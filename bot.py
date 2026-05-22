@@ -6091,7 +6091,14 @@ async def adm_backup_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def adm_backup_all_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Ask admin for encryption password to backup all data."""
     q = update.callback_query; await q.answer()
-    _admin_import_pending[update.effective_chat.id] = {"step": "adm_backup_pw_wait"}
+    chat_id = update.effective_chat.id
+    if chat_id in _admin_backup_in_progress:
+        await q.answer(
+            "A backup is already in progress. Please wait for it to complete before starting a new backup.",
+            show_alert=True,
+        )
+        return
+    _admin_import_pending[chat_id] = {"step": "adm_backup_pw_wait"}
     await q.edit_message_text(
         "Enter the password you want to use for file encryption."
     )
@@ -6100,7 +6107,14 @@ async def adm_backup_all_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def adm_backup_restore_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Ask admin to send the encrypted backup file."""
     q = update.callback_query; await q.answer()
-    _admin_import_pending[update.effective_chat.id] = {"step": "adm_backup_restore_file"}
+    chat_id = update.effective_chat.id
+    if chat_id in _admin_restore_in_progress:
+        await q.answer(
+            "A restore is already in progress. Please wait for it to complete before starting a new restore.",
+            show_alert=True,
+        )
+        return
+    _admin_import_pending[chat_id] = {"step": "adm_backup_restore_file"}
     await q.edit_message_text("Send your encrypted data file here.")
 
 
@@ -7132,7 +7146,9 @@ _export_in_progress: set = set()
 _import_in_progress: set = set()
 
 
-_admin_import_pending: dict = {}   # chat_id -> {step: str, ...}
+_admin_import_pending:      dict = {}   # chat_id -> {step: str, ...}
+_admin_backup_in_progress:  set  = set()  # group chat_ids currently doing backup
+_admin_restore_in_progress: set  = set()  # group chat_ids currently doing restore
 
 async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Unified handler for ALL non-command messages in the admin group.
@@ -7308,8 +7324,15 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             )
             asyncio.create_task(auto_delete_msg(msg, delay=60))
             return
-        # Validation passed — clear the pending step
+        if chat_id in _admin_backup_in_progress:
+            msg = await update.message.reply_text(
+                "A backup is already in progress. Please wait for it to complete."
+            )
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        # Validation passed — clear the pending step and lock
         _admin_import_pending.pop(chat_id, None)
+        _admin_backup_in_progress.add(chat_id)
         password = raw
         progress = await update.message.reply_text("⏳ Creating backup, please wait...")
         _backup_tables = [
@@ -7337,6 +7360,7 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             payload = await asyncio.to_thread(_build_backup)
         except Exception as e:
             logger.error(f"Admin backup failed: {e}")
+            _admin_backup_in_progress.discard(chat_id)
             try:
                 await progress.delete()
             except Exception:
@@ -7347,6 +7371,7 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
         # Telegram max file size is 50MB
         size_mb = len(payload) / (1024 * 1024)
         if size_mb > 49:
+            _admin_backup_in_progress.discard(chat_id)
             try:
                 await progress.delete()
             except Exception:
@@ -7364,6 +7389,7 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             await progress.delete()
         except Exception:
             pass
+        _admin_backup_in_progress.discard(chat_id)
         await ctx.bot.send_document(
             chat_id=chat_id, document=bio, filename=fname,
             caption=(
@@ -7397,6 +7423,12 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
         payload = state.get("payload", b"")
         _admin_import_pending.pop(chat_id, None)
         asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        if chat_id in _admin_restore_in_progress:
+            msg = await update.message.reply_text(
+                "A restore is already in progress. Please wait for it to complete."
+            )
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
         try:
             plain = _admin_decrypt(payload, raw)
             dump  = json.loads(plain.decode())
@@ -7406,6 +7438,7 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             )
             asyncio.create_task(auto_delete_msg(msg, delay=60))
             return
+        _admin_restore_in_progress.add(chat_id)
         progress = await update.message.reply_text("⏳ Restoring data, please wait...")
         _restore_tables = [
             "users", "totp_accounts", "sessions", "reset_otps", "reset_attempts",
@@ -7443,6 +7476,7 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             restored = await asyncio.to_thread(_do_restore)
         except Exception as e:
             logger.error(f"Admin restore failed: {e}")
+            _admin_restore_in_progress.discard(chat_id)
             try:
                 await progress.delete()
             except Exception:
@@ -7451,6 +7485,7 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             asyncio.create_task(auto_delete_msg(msg, delay=60))
             return
         _load_bot_settings()
+        _admin_restore_in_progress.discard(chat_id)
         try:
             await progress.delete()
         except Exception:
