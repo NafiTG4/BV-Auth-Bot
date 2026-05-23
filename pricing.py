@@ -4,7 +4,7 @@ pricing.py — BV Authenticator Subscription, Pricing & Payment Module
 এই একটা file এ সব আছে। Edit করতে হলে শুধু এই file এ করলেই হবে।
 
 SETUP CHECKLIST:
-  1. MORALIS_API_KEY set করো  (https://moralis.io)
+  1. ALCHEMY_API_KEY set করো  (https://alchemy.com)
   2. HD_WALLET_MNEMONIC set করো  (fresh 24-word BIP39, NEVER reuse)
   3. PLANS dict edit করো — name, price, duration, features
   4. pip install bip_utils eth_account qrcode[pil] aiohttp base58
@@ -16,18 +16,42 @@ import os, time, asyncio, logging, secrets
 from io import BytesIO
 from typing import Optional
 
-import aiohttp
-import qrcode
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ContextTypes, CallbackQueryHandler
 
 logger = logging.getLogger(__name__)
 
+# Lazy imports — only loaded when subscription features are actually used
+def _import_aiohttp():
+    try:
+        import aiohttp
+        return aiohttp
+    except ImportError:
+        raise ImportError("Run: pip install aiohttp")
+
+def _import_qrcode():
+    try:
+        import qrcode
+        return qrcode
+    except ImportError:
+        raise ImportError("Run: pip install qrcode[pil]")
+
 # ═════════════════════════════════════════════════════════════════════════════
 # ① CONFIG — API KEYS
 # ═════════════════════════════════════════════════════════════════════════════
-MORALIS_API_KEY: str = os.environ.get("MORALIS_API_KEY", "YOUR_MORALIS_API_KEY_HERE")
+ALCHEMY_API_KEY: str = os.environ.get("ALCHEMY_API_KEY", "YOUR_ALCHEMY_API_KEY_HERE")
+
+# Alchemy base URLs per chain (update if you use a different network)
+ALCHEMY_URLS: dict = {
+    "ethereum": f"https://eth-mainnet.g.alchemy.com/v2/{{key}}",
+    "base":     f"https://base-mainnet.g.alchemy.com/v2/{{key}}",
+    "bnb":      f"https://bnb-mainnet.g.alchemy.com/v2/{{key}}",
+    "polygon":  f"https://polygon-mainnet.g.alchemy.com/v2/{{key}}",
+    "arbitrum": f"https://arb-mainnet.g.alchemy.com/v2/{{key}}",
+    "optimism": f"https://opt-mainnet.g.alchemy.com/v2/{{key}}",
+    "avalanche":f"https://avax-mainnet.g.alchemy.com/v2/{{key}}",
+    "polkadot": f"https://moonbeam-mainnet.g.alchemy.com/v2/{{key}}",
+}
 
 # BIP39 mnemonic — generate fresh at https://iancoleman.io/bip39 (offline!)
 HD_WALLET_MNEMONIC: str = os.environ.get(
@@ -99,7 +123,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "ethereum", "name": "Ethereum", "logo": "⟠",
         "family": "evm", "coin_type": 60, "bip44_index": 0,
-        "moralis_chain": "eth",
         "token_contracts": {
             "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
             "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
@@ -109,7 +132,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "base", "name": "Base", "logo": "🔵",
         "family": "evm", "coin_type": 60, "bip44_index": 1,
-        "moralis_chain": "base",
         "token_contracts": {
             "USDC": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "USDT": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
@@ -119,7 +141,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "bnb", "name": "BNB Smart Chain", "logo": "🟡",
         "family": "evm", "coin_type": 60, "bip44_index": 2,
-        "moralis_chain": "bsc",
         "token_contracts": {
             "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
             "USDT": "0x55d398326f99059fF775485246999027B3197955",
@@ -129,7 +150,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "polygon", "name": "Polygon PoS", "logo": "🟣",
         "family": "evm", "coin_type": 60, "bip44_index": 3,
-        "moralis_chain": "polygon",
         "token_contracts": {
             "USDC": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
             "USDT": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
@@ -139,7 +159,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "arbitrum", "name": "Arbitrum", "logo": "🔷",
         "family": "evm", "coin_type": 60, "bip44_index": 4,
-        "moralis_chain": "arbitrum",
         "token_contracts": {
             "USDC": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
             "USDT": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
@@ -149,7 +168,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "optimism", "name": "Optimism", "logo": "🔴",
         "family": "evm", "coin_type": 60, "bip44_index": 5,
-        "moralis_chain": "optimism",
         "token_contracts": {
             "USDC": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
             "USDT": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
@@ -159,7 +177,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "avalanche", "name": "Avalanche", "logo": "🏔",
         "family": "evm", "coin_type": 60, "bip44_index": 6,
-        "moralis_chain": "avalanche",
         "token_contracts": {
             "USDC": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
             "USDT": "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
@@ -169,7 +186,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "solana", "name": "Solana", "logo": "◎",
         "family": "solana", "coin_type": 501, "bip44_index": 7,
-        "moralis_chain": None,
         "token_contracts": {
             "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
             "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
@@ -179,7 +195,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "tron", "name": "Tron", "logo": "⚡",
         "family": "tron", "coin_type": 195, "bip44_index": 8,
-        "moralis_chain": None,
         "token_contracts": {
             "USDC": "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8",
             "USDT": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
@@ -189,7 +204,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "sui", "name": "Sui", "logo": "💧",
         "family": "sui", "coin_type": 784, "bip44_index": 9,
-        "moralis_chain": None,
         "token_contracts": {
             "USDC": "0x5d4b302506645c37ff133b98c4b50a4ae4614bb56fc4f8f7cf4a98e0b4783ade::coin::COIN",
             "USDT": "0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::COIN",
@@ -199,7 +213,6 @@ SUPPORTED_CHAINS: list[dict] = [
     {
         "id": "polkadot", "name": "Polkadot (AssetHub)", "logo": "⚫",
         "family": "evm", "coin_type": 60, "bip44_index": 10,
-        "moralis_chain": "moonbeam",
         "token_contracts": {
             "USDC": "0x931715FEE2d06333043d11F658C8CE934aC61D0c",
             "USDT": "0xFFFFFFfFea09FB06d082fd1275CD48b191cbCD1d",
@@ -422,6 +435,7 @@ def generate_payment_qr(address: str, amount_usd: float,
         uri = f"solana:{address}?amount={amount_usd}&spl-token={contract}"
     else:
         uri = address
+    qrcode = _import_qrcode()
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -487,40 +501,63 @@ def expire_old_invoices(db_conn):
     db_conn.commit()
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ⑫ PAYMENT VERIFICATION
+# ⑫ PAYMENT VERIFICATION  (Alchemy for EVM, public RPCs for others)
 # ═════════════════════════════════════════════════════════════════════════════
-_MORALIS_BASE = "https://deep-index.moralis.io/api/v2.2"
-
-async def _moralis_get(session: aiohttp.ClientSession, path: str, params: dict = None) -> dict:
-    headers = {"X-API-Key": MORALIS_API_KEY}
-    async with session.get(f"{_MORALIS_BASE}{path}", headers=headers, params=params or {}) as r:
-        return await r.json()
+def _alchemy_url(chain_id: str) -> str:
+    template = ALCHEMY_URLS.get(chain_id, "")
+    return template.format(key=ALCHEMY_API_KEY)
 
 async def _verify_evm(chain: dict, token: str, address: str,
                        amount_usd: float, since_ts: int) -> tuple[bool, str]:
-    contract      = chain["token_contracts"].get(token)
+    """Verify EVM token transfer using Alchemy alchemy_getAssetTransfers."""
+    contract   = chain["token_contracts"].get(token)
     if not contract:
         return False, ""
-    amount_min    = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
+    amount_min = amount_usd * PAYMENT_TOLERANCE
+    url        = _alchemy_url(chain["id"])
+    if not url:
+        logger.warning(f"No Alchemy URL configured for chain {chain['id']}")
+        return False, ""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "alchemy_getAssetTransfers",
+        "params": [{
+            "fromBlock":         "0x0",
+            "toAddress":         address,
+            "contractAddresses": [contract],
+            "category":          ["erc20"],
+            "withMetadata":      True,
+            "excludeZeroValue":  True,
+            "maxCount":          "0x19",
+        }],
+    }
+    aiohttp = _import_aiohttp()
     async with aiohttp.ClientSession() as session:
         try:
-            data = await _moralis_get(
-                session,
-                f"/erc20/{contract}/transfers",
-                params={
-                    "chain":      chain["moralis_chain"],
-                    "to_address": address.lower(),
-                    "from_date":  since_ts,
-                    "limit":      25,
-                },
-            )
-            for tx in data.get("result", []):
-                if tx.get("to_address", "").lower() != address.lower():
-                    continue
-                if int(tx.get("value", "0")) >= amount_min:
-                    return True, tx.get("transaction_hash", "")
+            async with session.post(url, json=payload) as r:
+                data = await r.json()
+            transfers = data.get("result", {}).get("transfers", [])
+            for tx in transfers:
+                metadata     = tx.get("metadata", {})
+                block_ts_str = metadata.get("blockTimestamp", "")
+                if block_ts_str:
+                    import datetime as _dt
+                    try:
+                        block_ts = int(
+                            _dt.datetime.fromisoformat(
+                                block_ts_str.replace("Z", "+00:00")
+                            ).timestamp()
+                        )
+                        if block_ts < since_ts:
+                            continue
+                    except Exception:
+                        pass
+                val = float(tx.get("value") or 0)
+                if val >= amount_min:
+                    return True, tx.get("hash", "")
         except Exception as e:
-            logger.error(f"Moralis EVM error ({chain['id']}): {e}")
+            logger.error(f"Alchemy EVM verify error ({chain['id']}): {e}")
     return False, ""
 
 async def _verify_solana(token: str, address: str, amount_usd: float) -> tuple[bool, str]:
@@ -529,6 +566,7 @@ async def _verify_solana(token: str, address: str, amount_usd: float) -> tuple[b
         return False, ""
     amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
     rpc        = "https://api.mainnet-beta.solana.com"
+    aiohttp    = _import_aiohttp()
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(rpc, json={
@@ -561,6 +599,7 @@ async def _verify_tron(token: str, address: str,
     amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
     url = (f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20"
            f"?contract_address={contract}&limit=20&only_to=true")
+    aiohttp = _import_aiohttp()
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(url) as r:
@@ -578,6 +617,7 @@ async def _verify_sui(token: str, address: str, amount_usd: float) -> tuple[bool
     coin_type  = get_chain("sui")["token_contracts"].get(token, "")
     amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
     rpc        = "https://fullnode.mainnet.sui.io:443"
+    aiohttp    = _import_aiohttp()
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(rpc, json={
