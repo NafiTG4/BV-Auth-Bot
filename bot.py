@@ -1199,7 +1199,7 @@ def init_db():
             signed_at     INTEGER DEFAULT (strftime('%s','now')))""")
 
         # Subscription & payment tables
-        from subscription import init_subscription_db
+        from pricing import init_subscription_db
         init_subscription_db(c)
 
         # Migrate users table: account_disabled, last_seen, total_disabled_count
@@ -9698,7 +9698,7 @@ def main():
 
     logger.info("BV Authenticator Bot started.")
     # Register subscription & payment handlers
-    from subscription import register_subscription_handlers
+    from pricing import register_subscription_handlers
     register_subscription_handlers(app, get_db)
 
     app.run_polling(drop_pending_updates=True)
