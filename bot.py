@@ -1198,6 +1198,10 @@ def init_db():
             terms_version TEXT    DEFAULT '',
             signed_at     INTEGER DEFAULT (strftime('%s','now')))""")
 
+        # Subscription & payment tables
+        from subscription import init_subscription_db
+        init_subscription_db(c)
+
         # Migrate users table: account_disabled, last_seen, total_disabled_count
         for col, coltype, default in [
             ("account_disabled", "INTEGER", "0"),
@@ -1799,6 +1803,7 @@ def kb_main():
          InlineKeyboardButton("📋 List of TOTP", callback_data="list_totp")],
         [InlineKeyboardButton("✏️ Edit TOTP",    callback_data="edit_totp"),
          InlineKeyboardButton("👤 Profile",       callback_data="profile")],
+        [InlineKeyboardButton("💎 Subscription",  callback_data="sub_plans")],
         [InlineKeyboardButton("⚙️ Settings",      callback_data="settings")],
         [InlineKeyboardButton("☕ Buy me a coffee", callback_data="donate_from_main")],
     ])
@@ -9692,6 +9697,10 @@ def main():
         )
 
     logger.info("BV Authenticator Bot started.")
+    # Register subscription & payment handlers
+    from subscription import register_subscription_handlers
+    register_subscription_handlers(app, get_db)
+
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
