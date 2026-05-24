@@ -1803,7 +1803,7 @@ def kb_main():
          InlineKeyboardButton("📋 List of TOTP", callback_data="list_totp")],
         [InlineKeyboardButton("✏️ Edit TOTP",    callback_data="edit_totp"),
          InlineKeyboardButton("👤 Profile",       callback_data="profile")],
-        [InlineKeyboardButton("💎 Subscription",  callback_data="sub_plans")],
+        [InlineKeyboardButton("Premium 💡",  callback_data="sub_plans")],
         [InlineKeyboardButton("⚙️ Settings",      callback_data="settings")],
         [InlineKeyboardButton("☕ Buy me a coffee", callback_data="donate_from_main")],
     ])
