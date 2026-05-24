@@ -66,48 +66,37 @@ HD_WALLET_MNEMONIC: str = os.environ.get(
 # totp_limit    = None  →  inherits global bot default
 
 PLANS: dict = {
-    "starter": {
-        "id":            "starter",
-        "name":          "⚡ Starter",
-        "price_usd":     4.99,
+    "plus_30": {
+        "id":            "plus_30",
+        "plan_group":    "plus",
+        "name":          "Plus",
+        "price_usd":     1.19,
         "duration_days": 30,
         "totp_limit":    None,
-        "features": [
-            "Full TOTP vault access",
-            "Export & Import vault",
-            "Offline auto-backup",
-            "Email support",
-        ],
-        "description": "Perfect for personal use.",
     },
-    "pro": {
-        "id":            "pro",
-        "name":          "🚀 Pro",
+    "plus_year": {
+        "id":            "plus_year",
+        "plan_group":    "plus",
+        "name":          "Plus",
         "price_usd":     9.99,
-        "duration_days": 30,
-        "totp_limit":    500,
-        "features": [
-            "Everything in Starter",
-            "500 TOTP entries",
-            "Priority support",
-            "Advanced security features",
-        ],
-        "description": "For power users who need more.",
+        "duration_days": 365,
+        "totp_limit":    None,
     },
-    "lifetime": {
-        "id":            "lifetime",
-        "name":          "👑 Lifetime",
-        "price_usd":     49.99,
-        "duration_days": 0,
-        "totp_limit":    1000,
-        "features": [
-            "Everything in Pro",
-            "1000 TOTP entries",
-            "Lifetime access — pay once",
-            "All future features included",
-            "VIP support",
-        ],
-        "description": "One-time payment, forever access.",
+    "pro_30": {
+        "id":            "pro_30",
+        "plan_group":    "pro",
+        "name":          "Pro",
+        "price_usd":     2.49,
+        "duration_days": 30,
+        "totp_limit":    None,
+    },
+    "pro_year": {
+        "id":            "pro_year",
+        "plan_group":    "pro",
+        "name":          "Pro",
+        "price_usd":     14.90,
+        "duration_days": 365,
+        "totp_limit":    None,
     },
 }
 
@@ -706,25 +695,27 @@ async def _invoice_poller(db_getter, bot):
 # ⑭ KEYBOARD BUILDERS
 # ═════════════════════════════════════════════════════════════════════════════
 def _kb_plans() -> InlineKeyboardMarkup:
-    buttons = []
-    for p in PLANS.values():
-        dur   = "Lifetime" if p["duration_days"] == 0 else f"{p['duration_days']}d"
-        label = f"{p['name']}  —  ${p['price_usd']:.2f} / {dur}"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"sub_plan:{p['id']}")])
-    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="main_menu")])
-    return InlineKeyboardMarkup(buttons)
-
-def _kb_plan_detail(plan_id: str) -> InlineKeyboardMarkup:
+    # Show only 2 buttons: Plus and Pro (no price shown)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💳 Buy Now", callback_data=f"sub_buy:{plan_id}")],
-        [InlineKeyboardButton("⬅️ Back",    callback_data="sub_plans")],
+        [InlineKeyboardButton("Plus",  callback_data="sub_plan:plus")],
+        [InlineKeyboardButton("Pro",   callback_data="sub_plan:pro")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")],
+    ])
+
+def _kb_plan_group(group: str) -> InlineKeyboardMarkup:
+    """Keyboard shown after clicking Plus or Pro — shows 30-day and yearly buy buttons."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"Buy {group.capitalize()} 30 Day Pack",  callback_data=f"sub_buy:{group}_30")],
+        [InlineKeyboardButton(f"Buy {group.capitalize()} 1 Year Pack",  callback_data=f"sub_buy:{group}_year")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="sub_plans")],
     ])
 
 def _kb_tokens(plan_id: str) -> InlineKeyboardMarkup:
+    group = PLANS.get(plan_id, {}).get("plan_group", "plus")
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔵 USDC", callback_data=f"sub_token:{plan_id}:USDC"),
          InlineKeyboardButton("🟢 USDT", callback_data=f"sub_token:{plan_id}:USDT")],
-        [InlineKeyboardButton("⬅️ Back", callback_data=f"sub_buy:{plan_id}")],
+        [InlineKeyboardButton("⬅️ Back", callback_data=f"sub_plan:{group}")],
     ])
 
 def _kb_chains(plan_id: str, token: str) -> InlineKeyboardMarkup:
@@ -779,21 +770,24 @@ async def cb_sub_plans(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cb_sub_plan_detail(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q       = update.callback_query; await q.answer()
-    plan_id = q.data.split(":", 1)[1]
-    plan    = get_plan(plan_id)
-    if not plan:
+    """Show plan group detail (Plus or Pro) with 30-day and yearly pricing."""
+    q     = update.callback_query; await q.answer()
+    group = q.data.split(":", 1)[1]   # "plus" or "pro"
+    if group == "plus":
+        text = (
+            "Plus Plan\n\n"
+            "$1.19 for 30 Days\n"
+            "$14.28/year → $9.99/year with 30% off"
+        )
+    elif group == "pro":
+        text = (
+            "Pro Plan\n\n"
+            "$2.49 for 30 Days\n"
+            "$29.88/year → $14.90/year with 50% off"
+        )
+    else:
         await q.answer("Plan not found.", show_alert=True); return
-    dur_str  = "Lifetime (never expires)" if plan["duration_days"] == 0 else f"{plan['duration_days']} days"
-    features = "\n".join(f"  ✔ {f}" for f in plan["features"])
-    await q.edit_message_text(
-        f"{plan['name']}\n\n"
-        f"💰 Price: *${plan['price_usd']:.2f}* ({dur_str})\n\n"
-        f"{plan['description']}\n\n"
-        f"*What's included:*\n{features}",
-        parse_mode="Markdown",
-        reply_markup=_kb_plan_detail(plan_id),
-    )
+    await q.edit_message_text(text, reply_markup=_kb_plan_group(group))
 
 async def cb_sub_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q       = update.callback_query; await q.answer()
@@ -801,8 +795,9 @@ async def cb_sub_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     plan    = get_plan(plan_id)
     if not plan:
         await q.answer("Plan not found.", show_alert=True); return
+    dur_label = "30 Days" if plan["duration_days"] == 30 else "1 Year"
     await q.edit_message_text(
-        f"💳 *Pay for {plan['name']}*\n\nAmount: *${plan['price_usd']:.2f}*\n\n"
+        f"💳 *{plan['name']} — {dur_label}*\n\nAmount: *${plan['price_usd']:.2f}*\n\n"
         "Select your preferred stablecoin:",
         parse_mode="Markdown",
         reply_markup=_kb_tokens(plan_id),
