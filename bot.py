@@ -6820,36 +6820,56 @@ async def adm_broadcast_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 def _fmt_invoice_info(inv: dict) -> str:
-    """Format invoice dict into a readable admin summary."""
+    """Format invoice dict into the required admin display format."""
     import datetime as _dt
     from pricing import get_plan, get_chain
     plan  = get_plan(inv.get("plan_id", ""))
     chain = get_chain(inv.get("chain_id", ""))
-    plan_name  = plan["name"]  if plan  else inv.get("plan_id", "?")
-    chain_name = f"{chain['logo']} {chain['name']}" if chain else inv.get("chain_id", "?")
-    created = _dt.datetime.utcfromtimestamp(inv["created_at"]).strftime("%d %b %Y %H:%M UTC")
-    expires = _dt.datetime.utcfromtimestamp(inv["expires_at"]).strftime("%d %b %Y %H:%M UTC")
-    paid_str = ""
-    if inv.get("paid_at"):
-        paid_str = _dt.datetime.utcfromtimestamp(inv["paid_at"]).strftime("%d %b %Y %H:%M UTC")
+    # Plan display name
+    pid = inv.get("plan_id", "")
+    plan_labels = {
+        "plus_30":   "Plus 30 Day",
+        "plus_year": "Plus 1 Year",
+        "pro_30":    "Pro 30 Day",
+        "pro_year":  "Pro 1 Year",
+    }
+    plan_name  = plan_labels.get(pid, pid)
+    chain_name = f"{chain['name']}" if chain else inv.get("chain_id", "?")
+    created_str = _dt.datetime.utcfromtimestamp(inv["created_at"]).strftime("%d %b %Y %H:%M UTC")
+    # Payment status mapping
+    status_raw = inv.get("status", "pending")
+    status_map = {"pending": "Pending", "paid": "Completed", "expired": "Canceled"}
+    status_str = status_map.get(status_raw, status_raw.capitalize())
+    # TX Hash line
+    if status_raw == "paid" and inv.get("tx_hash"):
+        tx_str = inv["tx_hash"]
+    else:
+        tx_str = "No payment has been received yet at this invoice address."
+    # User ID lookup
+    user_id_str = "Unknown"
+    try:
+        with get_db() as c:
+            u = c.execute("SELECT telegram_id FROM users WHERE vault_id=?",
+                          (inv.get("vault_id", ""),)).fetchone()
+        if u:
+            user_id_str = str(u["telegram_id"])
+    except Exception:
+        pass
     lines = [
-        f"Invoice Info",
-        f"",
-        f"ID       : {inv['invoice_id']}",
-        f"Vault    : {inv['vault_id']}",
-        f"Plan     : {plan_name}",
-        f"Token    : {inv['token']}",
-        f"Network  : {chain_name}",
-        f"Amount   : ${inv['amount_usd']:.2f}",
-        f"Address  : {inv['address']}",
-        f"Status   : {inv['status'].upper()}",
-        f"Created  : {created}",
-        f"Expires  : {expires}",
+        "Invoice Information",
+        "",
+        f"Invoice ID : {inv.get('invoice_id', '')}",
+        f"Invoice Created Time : {created_str}",
+        f"Payment Status : {status_str}",
+        f"Payment Address : {inv.get('address', '')}",
+        f"Stablecoin : {inv.get('token', '')}",
+        f"Network/Chain : {chain_name}",
+        f"TX Hash : {tx_str}",
+        f"Plan : {plan_name}",
+        f"Price : ${inv.get('amount_usd', 0):.2f}",
+        f"Vault ID : {inv.get('vault_id', '')}",
+        f"User ID : {user_id_str}",
     ]
-    if paid_str:
-        lines.append(f"Paid At  : {paid_str}")
-    if inv.get("tx_hash"):
-        lines.append(f"Tx Hash  : {inv['tx_hash']}")
     return "\n".join(lines)
 
 
@@ -6888,15 +6908,23 @@ async def adm_premium_plan_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Show subscribers of a plan group."""
-    from pricing import PLANS, get_active_subscription
-    q         = update.callback_query; await q.answer()
-    group     = q.data.split(":", 1)[1]   # basic / plus / pro
-    plan_ids  = [pid for pid, p in PLANS.items() if p.get("plan_group") == group]
-    now       = int(time.time())
+    """Show plan info or subscribers of a plan group."""
+    from pricing import PLANS
+    q     = update.callback_query; await q.answer()
+    group = q.data.split(":", 1)[1]   # basic / plus / pro
+    back_kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan"),
+    ]])
+    if group == "basic":
+        await q.edit_message_text("This is free plan.", reply_markup=back_kb)
+        return
+    plan_ids = [pid for pid, p in PLANS.items() if p.get("plan_group") == group]
+    if not plan_ids:
+        await q.edit_message_text(f"No plans found for group: {group}", reply_markup=back_kb)
+        return
     with get_db() as c:
         rows = c.execute(
-            f"""SELECT s.vault_id, s.plan_id, s.expires_at, s.is_active,
+            f"""SELECT s.vault_id, s.plan_id, s.expires_at, s.activated_at,
                        u.tg_username, u.telegram_id
                 FROM subscriptions s
                 LEFT JOIN users u ON u.vault_id = s.vault_id
@@ -6905,30 +6933,22 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
                 ORDER BY s.activated_at DESC
                 LIMIT 50""",
             plan_ids,
-        ).fetchall() if plan_ids else []
+        ).fetchall()
     if not rows:
         await q.edit_message_text(
             f"No active {group.capitalize()} subscribers found.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan"),
-            ]]),
+            reply_markup=back_kb,
         )
         return
-    lines = [f"Active {group.capitalize()} subscribers ({len(rows)})\n"]
+    import datetime as _dt
+    lines = [f"Active {group.capitalize()} Subscribers ({len(rows)})\n"]
     for r in rows:
         uname = f"@{r['tg_username']}" if r["tg_username"] else str(r["telegram_id"])
-        if r["expires_at"]:
-            import datetime as _dt
-            exp = _dt.datetime.utcfromtimestamp(r["expires_at"]).strftime("%d %b %Y")
-        else:
-            exp = "Lifetime"
-        lines.append(f"• {r['vault_id']} ({uname}) — {r['plan_id']} — expires {exp}")
-    await q.edit_message_text(
-        "\n".join(lines),
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan"),
-        ]]),
-    )
+        exp   = (_dt.datetime.utcfromtimestamp(r["expires_at"]).strftime("%d %b %Y")
+                 if r["expires_at"] else "Lifetime")
+        plan_label = r["plan_id"].replace("_", " ").replace("plus", "Plus").replace("pro", "Pro").replace("30", "30 Day").replace("year", "1 Year")
+        lines.append(f"• {r['vault_id']}  ({uname})\n  Plan: {plan_label}  |  Expires: {exp}")
+    await q.edit_message_text("\n".join(lines), reply_markup=back_kb)
 
 
 async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -6962,11 +6982,11 @@ async def adm_premium_invoice_by_addr_cb(update: Update, ctx: ContextTypes.DEFAU
 
 
 async def adm_premium_invoice_by_id_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Ask admin to send a vault ID or invoice ID."""
+    """Ask admin for vault ID or telegram ID to list all invoices."""
     q = update.callback_query; await q.answer()
     _admin_import_pending[update.effective_chat.id] = {"step": "adm_prem_inv_id_wait"}
     await q.edit_message_text(
-        "Send the Invoice ID or Vault ID to look up the invoice."
+        "Send the Vault ID or Telegram User ID to see all invoices for that user."
     )
 
 
@@ -8234,25 +8254,42 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
     if step == "adm_prem_inv_id_wait":
         _admin_import_pending.pop(chat_id, None)
         asyncio.create_task(auto_delete_msg(update.message, delay=5))
-        with get_db() as c:
-            # Try invoice_id first
-            row = c.execute(
-                "SELECT * FROM payment_invoices WHERE invoice_id LIKE ? ORDER BY created_at DESC LIMIT 1",
-                (raw.strip() + "%",)
-            ).fetchone()
-            if not row:
-                # Try vault_id
-                row = c.execute(
-                    "SELECT * FROM payment_invoices WHERE vault_id=? ORDER BY created_at DESC LIMIT 1",
-                    (raw.strip(),)
-                ).fetchone()
-        if not row:
-            msg = await update.message.reply_text(f"No invoice found for: {raw.strip()}")
+        raw_val = raw.strip()
+        # Resolve vault_id and telegram_id
+        vault_id    = None
+        telegram_id = None
+        u = _resolve_user(raw_val)
+        if u:
+            vault_id    = u["vault_id"]
+            telegram_id = u["telegram_id"]
+        else:
+            msg = await update.message.reply_text(f"User not found: {raw_val}")
             asyncio.create_task(auto_delete_msg(msg, delay=60))
             return
-        inv = dict(row)
-        msg = await update.message.reply_text(_fmt_invoice_info(inv))
-        asyncio.create_task(auto_delete_msg(msg, delay=120))
+        import datetime as _dt
+        with get_db() as c:
+            rows = c.execute(
+                "SELECT invoice_id, created_at, status FROM payment_invoices WHERE vault_id=? ORDER BY created_at DESC",
+                (vault_id,)
+            ).fetchall()
+        if not rows:
+            msg = await update.message.reply_text(f"No invoices found for vault {vault_id}.")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        lines = [
+            "Invoice List",
+            "",
+            f"User ID  : {telegram_id}",
+            f"Vault ID : {vault_id}",
+            "",
+        ]
+        for i, r in enumerate(rows, start=1):
+            created_str = _dt.datetime.utcfromtimestamp(r["created_at"]).strftime("%d %b %Y %H:%M UTC")
+            lines.append(f"{i} : {r['invoice_id']}")
+            lines.append(f"Created : {created_str}")
+            lines.append("")
+        msg = await update.message.reply_text("\n".join(lines))
+        asyncio.create_task(auto_delete_msg(msg, delay=300))
         return
 
     if step == "adm_set_maintenance_msg_wait":
