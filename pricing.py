@@ -478,6 +478,30 @@ def expire_old_invoices(db_conn):
     )
     db_conn.commit()
 
+def _fmt_expiry(expires_at: int, tz_str: str) -> str:
+    """Format expiry timestamp in user's timezone."""
+    import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        tz  = ZoneInfo(tz_str or "UTC")
+    except Exception:
+        from zoneinfo import ZoneInfo
+        tz  = ZoneInfo("UTC")
+    dt = _dt.datetime.fromtimestamp(expires_at, tz=tz)
+    return dt.strftime("%d %b %Y %H:%M %Z")
+
+def _get_user_tz(vault_id: str) -> str:
+    """Fetch user's timezone string from DB. Falls back to UTC."""
+    try:
+        from bot import get_db
+        with get_db() as db:
+            row = db.execute(
+                "SELECT timezone FROM users WHERE vault_id=?", (vault_id,)
+            ).fetchone()
+        return (row["timezone"] or "UTC") if row else "UTC"
+    except Exception:
+        return "UTC"
+
 # ═════════════════════════════════════════════════════════════════════════════
 # ⑫ PAYMENT VERIFICATION  (Alchemy for EVM, public RPCs for others)
 # ═════════════════════════════════════════════════════════════════════════════
@@ -643,12 +667,72 @@ async def _invoice_poller(db_getter, bot):
     while True:
         await asyncio.sleep(INVOICE_POLL_INTERVAL)
         try:
+            now = int(time.time())
             with db_getter() as db:
-                expire_old_invoices(db)
-                rows = db.execute(
-                    "SELECT * FROM payment_invoices WHERE status='pending'"
+                # Get pending invoices that just expired (for one-time final check)
+                just_expired = db.execute(
+                    """SELECT * FROM payment_invoices
+                       WHERE status='pending' AND expires_at <= ?""",
+                    (now,),
                 ).fetchall()
-            for row in rows:
+            # Final payment check for just-expired invoices before marking expired
+            for row in just_expired:
+                invoice = dict(row)
+                paid, tx_hash = await verify_payment(invoice)
+                with db_getter() as db:
+                    if paid:
+                        db.execute(
+                            """UPDATE payment_invoices
+                               SET status='paid', paid_at=?, tx_hash=?
+                               WHERE invoice_id=?""",
+                            (now, tx_hash, invoice["invoice_id"]),
+                        )
+                        activate_subscription(db, invoice["vault_id"], invoice["plan_id"])
+                    else:
+                        db.execute(
+                            "UPDATE payment_invoices SET status='expired' WHERE invoice_id=?",
+                            (invoice["invoice_id"],),
+                        )
+                    db.commit()
+                # Notify user
+                plan = get_plan(invoice["plan_id"])
+                try:
+                    with db_getter() as db:
+                        user_row = db.execute(
+                            "SELECT telegram_id FROM users WHERE vault_id=?",
+                            (invoice["vault_id"],)
+                        ).fetchone()
+                    if user_row:
+                        if paid:
+                            await bot.send_message(
+                                chat_id=user_row["telegram_id"],
+                                text=(
+                                    f"✅ Payment confirmed!\n\n"
+                                    f"Your *{plan['name']}* plan is now active.\n"
+                                    f"Thank you for subscribing! 🎉"
+                                ),
+                                parse_mode="Markdown",
+                            )
+                        else:
+                            await bot.send_message(
+                                chat_id=user_row["telegram_id"],
+                                text=(
+                                    f"⌛ Your invoice for *{plan['name']}* has expired "
+                                    f"and no payment was detected.\n\n"
+                                    f"You can start a new payment anytime from Premium 💡."
+                                ),
+                                parse_mode="Markdown",
+                            )
+                except Exception as e:
+                    logger.error(f"Poller notify (expired) error: {e}")
+
+            # Normal check: still-pending, not-yet-expired invoices
+            with db_getter() as db:
+                still_pending = db.execute(
+                    "SELECT * FROM payment_invoices WHERE status='pending' AND expires_at > ?",
+                    (now,),
+                ).fetchall()
+            for row in still_pending:
                 invoice = dict(row)
                 paid, tx_hash = await verify_payment(invoice)
                 if not paid:
@@ -658,9 +742,10 @@ async def _invoice_poller(db_getter, bot):
                         """UPDATE payment_invoices
                            SET status='paid', paid_at=?, tx_hash=?
                            WHERE invoice_id=?""",
-                        (int(time.time()), tx_hash, invoice["invoice_id"]),
+                        (now, tx_hash, invoice["invoice_id"]),
                     )
                     activate_subscription(db, invoice["vault_id"], invoice["plan_id"])
+                    db.commit()
                 plan = get_plan(invoice["plan_id"])
                 try:
                     with db_getter() as db:
@@ -848,7 +933,8 @@ async def cb_sub_chain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]]),
         ); return
     import datetime
-    exp_str = datetime.datetime.utcfromtimestamp(invoice["expires_at"]).strftime("%d %b %Y %H:%M UTC")
+    user_tz = _get_user_tz(vault)
+    exp_str = _fmt_expiry(invoice["expires_at"], user_tz)
     qr_buf  = await asyncio.to_thread(
         generate_payment_qr,
         invoice["address"], invoice["amount_usd"], token, chain,
@@ -920,6 +1006,8 @@ async def cb_sub_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         remaining = invoice["expires_at"] - now
         chain     = get_chain(invoice["chain_id"])
         plan      = get_plan(invoice["plan_id"])
+        user_tz   = _get_user_tz(invoice["vault_id"])
+        exp_str   = _fmt_expiry(invoice["expires_at"], user_tz)
         await q.edit_message_caption(
             caption=(
                 f"⏳ *Payment Pending*\n\n"
@@ -927,7 +1015,7 @@ async def cb_sub_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"Amount: `{invoice['amount_usd']:.2f}` {invoice['token']}\n"
                 f"Network: {chain['logo']} {chain['name']}\n"
                 f"Address: `{invoice['address']}`\n\n"
-                f"⌛ Expires in: {remaining // 60} min\n\n"
+                f"⌛ Expires: {exp_str} ({remaining // 60} min left)\n\n"
                 "Payment not detected yet. Wait for confirmation then check again."
             ),
             parse_mode="Markdown",
@@ -935,7 +1023,7 @@ async def cb_sub_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 async def cb_sub_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    from bot import get_db
+    from bot import get_db, get_session, kb_main
     q          = update.callback_query; await q.answer()
     invoice_id = q.data.split(":", 1)[1]
     with get_db() as db:
@@ -944,13 +1032,22 @@ async def cb_sub_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             (invoice_id,),
         )
         db.commit()
-    await q.edit_message_caption(
-        caption="❌ Invoice cancelled. You can start a new payment anytime.",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🔄 New Payment", callback_data="sub_plans"),
-            InlineKeyboardButton("🏠 Home",        callback_data="main_menu"),
-        ]]),
-    )
+    # Delete the QR/invoice message and send a fresh home message
+    try:
+        await q.message.delete()
+    except Exception:
+        pass
+    uid   = update.effective_user.id
+    vault = get_session(uid)
+    if vault:
+        await update.effective_chat.send_message(
+            "❌ Invoice cancelled.\n\nChoose an option:",
+            reply_markup=kb_main(),
+        )
+    else:
+        await update.effective_chat.send_message(
+            "❌ Invoice cancelled.",
+        )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ⑯ REGISTER HANDLERS  (call this once at bot startup)
