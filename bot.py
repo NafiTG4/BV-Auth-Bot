@@ -5737,6 +5737,7 @@ def _adm_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💸 Donate",          callback_data="adm_donate")],
         [InlineKeyboardButton("❓ Help Centre",       callback_data="adm_help_centre")],
         [InlineKeyboardButton("📜 Terms",             callback_data="adm_terms")],
+        [InlineKeyboardButton("💡 Premium",           callback_data="adm_premium")],
     ])
 
 
@@ -6818,6 +6819,40 @@ async def adm_broadcast_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("📢 Broadcast\n\nChoose broadcast type.", reply_markup=kb)
 
 
+def _fmt_invoice_info(inv: dict) -> str:
+    """Format invoice dict into a readable admin summary."""
+    import datetime as _dt
+    from pricing import get_plan, get_chain
+    plan  = get_plan(inv.get("plan_id", ""))
+    chain = get_chain(inv.get("chain_id", ""))
+    plan_name  = plan["name"]  if plan  else inv.get("plan_id", "?")
+    chain_name = f"{chain['logo']} {chain['name']}" if chain else inv.get("chain_id", "?")
+    created = _dt.datetime.utcfromtimestamp(inv["created_at"]).strftime("%d %b %Y %H:%M UTC")
+    expires = _dt.datetime.utcfromtimestamp(inv["expires_at"]).strftime("%d %b %Y %H:%M UTC")
+    paid_str = ""
+    if inv.get("paid_at"):
+        paid_str = _dt.datetime.utcfromtimestamp(inv["paid_at"]).strftime("%d %b %Y %H:%M UTC")
+    lines = [
+        f"Invoice Info",
+        f"",
+        f"ID       : {inv['invoice_id']}",
+        f"Vault    : {inv['vault_id']}",
+        f"Plan     : {plan_name}",
+        f"Token    : {inv['token']}",
+        f"Network  : {chain_name}",
+        f"Amount   : ${inv['amount_usd']:.2f}",
+        f"Address  : {inv['address']}",
+        f"Status   : {inv['status'].upper()}",
+        f"Created  : {created}",
+        f"Expires  : {expires}",
+    ]
+    if paid_str:
+        lines.append(f"Paid At  : {paid_str}")
+    if inv.get("tx_hash"):
+        lines.append(f"Tx Hash  : {inv['tx_hash']}")
+    return "\n".join(lines)
+
+
 async def adm_back_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     _admin_import_pending.pop(update.effective_chat.id, None)
@@ -6827,8 +6862,115 @@ async def adm_back_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ── ADMIN: Premium ─────────────────────────────────────────────────────────────
 
-# ── ADMIN: Donate ──────────────────────────────────────────────────────────────
+async def adm_premium_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Premium main menu — Plan and Invoice."""
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Plan",    callback_data="adm_premium_plan")],
+        [InlineKeyboardButton("🧾 Invoice", callback_data="adm_premium_invoice")],
+        [InlineKeyboardButton("⬅️ Back",    callback_data="adm_back")],
+    ])
+    await q.edit_message_text("💡 Premium", reply_markup=kb)
+
+
+async def adm_premium_plan_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show plan list: Basic / Plus / Pro."""
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Basic", callback_data="adm_premium_plan_view:basic")],
+        [InlineKeyboardButton("Plus",  callback_data="adm_premium_plan_view:plus")],
+        [InlineKeyboardButton("Pro",   callback_data="adm_premium_plan_view:pro")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium")],
+    ])
+    await q.edit_message_text("📋 Select a plan to view details:", reply_markup=kb)
+
+
+async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show subscribers of a plan group."""
+    from pricing import PLANS, get_active_subscription
+    q         = update.callback_query; await q.answer()
+    group     = q.data.split(":", 1)[1]   # basic / plus / pro
+    plan_ids  = [pid for pid, p in PLANS.items() if p.get("plan_group") == group]
+    now       = int(time.time())
+    with get_db() as c:
+        rows = c.execute(
+            f"""SELECT s.vault_id, s.plan_id, s.expires_at, s.is_active,
+                       u.tg_username, u.telegram_id
+                FROM subscriptions s
+                LEFT JOIN users u ON u.vault_id = s.vault_id
+                WHERE s.plan_id IN ({','.join('?'*len(plan_ids))})
+                  AND s.is_active = 1
+                ORDER BY s.activated_at DESC
+                LIMIT 50""",
+            plan_ids,
+        ).fetchall() if plan_ids else []
+    if not rows:
+        await q.edit_message_text(
+            f"No active {group.capitalize()} subscribers found.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan"),
+            ]]),
+        )
+        return
+    lines = [f"Active {group.capitalize()} subscribers ({len(rows)})\n"]
+    for r in rows:
+        uname = f"@{r['tg_username']}" if r["tg_username"] else str(r["telegram_id"])
+        if r["expires_at"]:
+            import datetime as _dt
+            exp = _dt.datetime.utcfromtimestamp(r["expires_at"]).strftime("%d %b %Y")
+        else:
+            exp = "Lifetime"
+        lines.append(f"• {r['vault_id']} ({uname}) — {r['plan_id']} — expires {exp}")
+    await q.edit_message_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan"),
+        ]]),
+    )
+
+
+async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Invoice sub-menu."""
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔍 Check Invoice Information", callback_data="adm_premium_invoice_check")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium")],
+    ])
+    await q.edit_message_text("🧾 Invoice", reply_markup=kb)
+
+
+async def adm_premium_invoice_check_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show check options: by address or by invoice/vault ID."""
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Check with Invoice or Address", callback_data="adm_premium_invoice_by_addr")],
+        [InlineKeyboardButton("🆔 Check Invoice with ID or Vault", callback_data="adm_premium_invoice_by_id")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_invoice")],
+    ])
+    await q.edit_message_text("🔍 Check Invoice Information", reply_markup=kb)
+
+
+async def adm_premium_invoice_by_addr_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send a wallet address or invoice ID."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_prem_inv_addr_wait"}
+    await q.edit_message_text(
+        "Send the wallet address or invoice ID to look up the invoice."
+    )
+
+
+async def adm_premium_invoice_by_id_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send a vault ID or invoice ID."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_prem_inv_id_wait"}
+    await q.edit_message_text(
+        "Send the Invoice ID or Vault ID to look up the invoice."
+    )
+
+
+# ── End Premium admin handlers ─────────────────────────────────────────────────
 
 async def adm_donate_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Show donate admin menu with Set Donate Message button."""
@@ -8064,6 +8206,53 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             f"Vault {vault_id} ({uname}) has been removed from the Maintenance Whitelist."
         )
         asyncio.create_task(auto_delete_msg(msg, delay=60))
+        return
+
+    if step == "adm_prem_inv_addr_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        with get_db() as c:
+            row = c.execute(
+                "SELECT * FROM payment_invoices WHERE address=? ORDER BY created_at DESC LIMIT 1",
+                (raw.strip(),)
+            ).fetchone()
+            if not row:
+                # Try as invoice_id prefix
+                row = c.execute(
+                    "SELECT * FROM payment_invoices WHERE invoice_id LIKE ? ORDER BY created_at DESC LIMIT 1",
+                    (raw.strip() + "%",)
+                ).fetchone()
+        if not row:
+            msg = await update.message.reply_text(f"No invoice found for: {raw.strip()}")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        inv = dict(row)
+        msg = await update.message.reply_text(_fmt_invoice_info(inv))
+        asyncio.create_task(auto_delete_msg(msg, delay=120))
+        return
+
+    if step == "adm_prem_inv_id_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        with get_db() as c:
+            # Try invoice_id first
+            row = c.execute(
+                "SELECT * FROM payment_invoices WHERE invoice_id LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (raw.strip() + "%",)
+            ).fetchone()
+            if not row:
+                # Try vault_id
+                row = c.execute(
+                    "SELECT * FROM payment_invoices WHERE vault_id=? ORDER BY created_at DESC LIMIT 1",
+                    (raw.strip(),)
+                ).fetchone()
+        if not row:
+            msg = await update.message.reply_text(f"No invoice found for: {raw.strip()}")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        inv = dict(row)
+        msg = await update.message.reply_text(_fmt_invoice_info(inv))
+        asyncio.create_task(auto_delete_msg(msg, delay=120))
         return
 
     if step == "adm_set_maintenance_msg_wait":
@@ -9648,6 +9837,13 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_specific_vault_max_cb),pattern="^adm_specific_vault_max$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_specific_vault_min_cb),pattern="^adm_specific_vault_min$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_back_cb),              pattern="^adm_back$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_cb),                    pattern="^adm_premium$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_cb),               pattern="^adm_premium_plan$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_cb),            pattern="^adm_premium_invoice$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_check_cb),      pattern="^adm_premium_invoice_check$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_by_addr_cb),    pattern="^adm_premium_invoice_by_addr$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_by_id_cb),      pattern="^adm_premium_invoice_by_id$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_donate_cb),              pattern="^adm_donate$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_donate_msg_cb),      pattern="^adm_set_donate_msg$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_help_centre_cb),         pattern="^adm_help_centre$"))
