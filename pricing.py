@@ -50,7 +50,6 @@ ALCHEMY_URLS: dict = {
     "arbitrum": f"https://arb-mainnet.g.alchemy.com/v2/{{key}}",
     "optimism": f"https://opt-mainnet.g.alchemy.com/v2/{{key}}",
     "avalanche":f"https://avax-mainnet.g.alchemy.com/v2/{{key}}",
-    "polkadot": f"https://moonbeam-mainnet.g.alchemy.com/v2/{{key}}",
 }
 
 # BIP39 mnemonic — generate fresh at https://iancoleman.io/bip39 (offline!)
@@ -66,6 +65,14 @@ HD_WALLET_MNEMONIC: str = os.environ.get(
 # totp_limit    = None  →  inherits global bot default
 
 PLANS: dict = {
+    "basic": {
+        "id":            "basic",
+        "plan_group":    "basic",
+        "name":          "Basic",
+        "price_usd":     0,
+        "duration_days": 0,
+        "totp_limit":    None,
+    },
     "plus_30": {
         "id":            "plus_30",
         "plan_group":    "plus",
@@ -110,15 +117,6 @@ TOKENS: list[str] = ["USDC", "USDT"]
 # ═════════════════════════════════════════════════════════════════════════════
 SUPPORTED_CHAINS: list[dict] = [
     {
-        "id": "ethereum", "name": "Ethereum", "logo": "⟠",
-        "family": "evm", "coin_type": 60, "bip44_index": 0,
-        "token_contracts": {
-            "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-            "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-        },
-        "explorer_url": "https://etherscan.io",
-    },
-    {
         "id": "base", "name": "Base", "logo": "🔵",
         "family": "evm", "coin_type": 60, "bip44_index": 1,
         "token_contracts": {
@@ -137,15 +135,6 @@ SUPPORTED_CHAINS: list[dict] = [
         "explorer_url": "https://bscscan.com",
     },
     {
-        "id": "polygon", "name": "Polygon PoS", "logo": "🟣",
-        "family": "evm", "coin_type": 60, "bip44_index": 3,
-        "token_contracts": {
-            "USDC": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-            "USDT": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-        },
-        "explorer_url": "https://polygonscan.com",
-    },
-    {
         "id": "arbitrum", "name": "Arbitrum", "logo": "🔷",
         "family": "evm", "coin_type": 60, "bip44_index": 4,
         "token_contracts": {
@@ -153,6 +142,15 @@ SUPPORTED_CHAINS: list[dict] = [
             "USDT": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
         },
         "explorer_url": "https://arbiscan.io",
+    },
+    {
+        "id": "polygon", "name": "Polygon PoS", "logo": "🟣",
+        "family": "evm", "coin_type": 60, "bip44_index": 3,
+        "token_contracts": {
+            "USDC": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "USDT": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+        },
+        "explorer_url": "https://polygonscan.com",
     },
     {
         "id": "optimism", "name": "Optimism", "logo": "🔴",
@@ -173,6 +171,15 @@ SUPPORTED_CHAINS: list[dict] = [
         "explorer_url": "https://snowtrace.io",
     },
     {
+        "id": "ethereum", "name": "Ethereum", "logo": "⟠",
+        "family": "evm", "coin_type": 60, "bip44_index": 0,
+        "token_contracts": {
+            "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        },
+        "explorer_url": "https://etherscan.io",
+    },
+    {
         "id": "solana", "name": "Solana", "logo": "◎",
         "family": "solana", "coin_type": 501, "bip44_index": 7,
         "token_contracts": {
@@ -182,15 +189,6 @@ SUPPORTED_CHAINS: list[dict] = [
         "explorer_url": "https://solscan.io",
     },
     {
-        "id": "tron", "name": "Tron", "logo": "⚡",
-        "family": "tron", "coin_type": 195, "bip44_index": 8,
-        "token_contracts": {
-            "USDC": "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8",
-            "USDT": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
-        },
-        "explorer_url": "https://tronscan.org",
-    },
-    {
         "id": "sui", "name": "Sui", "logo": "💧",
         "family": "sui", "coin_type": 784, "bip44_index": 9,
         "token_contracts": {
@@ -198,15 +196,6 @@ SUPPORTED_CHAINS: list[dict] = [
             "USDT": "0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::COIN",
         },
         "explorer_url": "https://suiscan.xyz",
-    },
-    {
-        "id": "polkadot", "name": "Polkadot (AssetHub)", "logo": "⚫",
-        "family": "evm", "coin_type": 60, "bip44_index": 10,
-        "token_contracts": {
-            "USDC": "0x931715FEE2d06333043d11F658C8CE934aC61D0c",
-            "USDT": "0xFFFFFFfFea09FB06d082fd1275CD48b191cbCD1d",
-        },
-        "explorer_url": "https://moonscan.io",
     },
 ]
 
@@ -584,7 +573,10 @@ async def _verify_solana(token: str, address: str, amount_usd: float) -> tuple[b
 
 async def _verify_tron(token: str, address: str,
                         amount_usd: float, since_ts: int) -> tuple[bool, str]:
-    contract   = get_chain("tron")["token_contracts"].get(token)
+    chain = get_chain("tron")
+    if not chain:
+        return False, ""
+    contract   = chain["token_contracts"].get(token)
     amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
     url = (f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20"
            f"?contract_address={contract}&limit=20&only_to=true")
@@ -695,10 +687,10 @@ async def _invoice_poller(db_getter, bot):
 # ⑭ KEYBOARD BUILDERS
 # ═════════════════════════════════════════════════════════════════════════════
 def _kb_plans() -> InlineKeyboardMarkup:
-    # Show only 2 buttons: Plus and Pro (no price shown)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Plus",  callback_data="sub_plan:plus")],
-        [InlineKeyboardButton("Pro",   callback_data="sub_plan:pro")],
+        [InlineKeyboardButton("Basic",  callback_data="sub_plan:basic")],
+        [InlineKeyboardButton("Plus",   callback_data="sub_plan:plus")],
+        [InlineKeyboardButton("Pro",    callback_data="sub_plan:pro")],
         [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")],
     ])
 
@@ -770,24 +762,32 @@ async def cb_sub_plans(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cb_sub_plan_detail(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Show plan group detail (Plus or Pro) with 30-day and yearly pricing."""
+    """Show plan group detail."""
     q     = update.callback_query; await q.answer()
-    group = q.data.split(":", 1)[1]   # "plus" or "pro"
-    if group == "plus":
+    group = q.data.split(":", 1)[1]
+    if group == "basic":
+        await q.edit_message_text(
+            "This is free plan",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Back", callback_data="sub_plans"),
+            ]]),
+        )
+    elif group == "plus":
         text = (
             "Plus Plan\n\n"
             "$1.19 for 30 Days\n"
             "$14.28/year → $9.99/year with 30% off"
         )
+        await q.edit_message_text(text, reply_markup=_kb_plan_group(group))
     elif group == "pro":
         text = (
             "Pro Plan\n\n"
             "$2.49 for 30 Days\n"
             "$29.88/year → $14.90/year with 50% off"
         )
+        await q.edit_message_text(text, reply_markup=_kb_plan_group(group))
     else:
-        await q.answer("Plan not found.", show_alert=True); return
-    await q.edit_message_text(text, reply_markup=_kb_plan_group(group))
+        await q.answer("Plan not found.", show_alert=True)
 
 async def cb_sub_buy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q       = update.callback_query; await q.answer()
