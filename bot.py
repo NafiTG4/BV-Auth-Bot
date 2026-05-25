@@ -6929,9 +6929,9 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("Plus Plan",                 callback_data="adm_noop")],
             [InlineKeyboardButton("Add Plus User",             callback_data="adm_noop")],
             [InlineKeyboardButton("Set Plus Message",          callback_data="adm_noop")],
-            [InlineKeyboardButton("Plus Plan Price",           callback_data="adm_noop")],
-            [InlineKeyboardButton("Plus Stablecoin",           callback_data="adm_noop")],
-            [InlineKeyboardButton("Plus Network",              callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus Plan Price",           callback_data="adm_plus_price")],
+            [InlineKeyboardButton("Plus Stablecoin",           callback_data="adm_plus_stablecoin")],
+            [InlineKeyboardButton("Plus Network",              callback_data="adm_plus_network")],
             [InlineKeyboardButton("Plus TOTP Control",         callback_data="adm_noop")],
             [InlineKeyboardButton("Plus TOTP Sharing Limit",   callback_data="adm_noop")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
@@ -6946,9 +6946,9 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("Pro Plan",                  callback_data="adm_noop")],
             [InlineKeyboardButton("Add Pro User",              callback_data="adm_noop")],
             [InlineKeyboardButton("Set Pro Message",           callback_data="adm_noop")],
-            [InlineKeyboardButton("Pro Plan Price",            callback_data="adm_noop")],
-            [InlineKeyboardButton("Pro Stablecoin",            callback_data="adm_noop")],
-            [InlineKeyboardButton("Pro Network",               callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro Plan Price",            callback_data="adm_pro_price")],
+            [InlineKeyboardButton("Pro Stablecoin",            callback_data="adm_pro_stablecoin")],
+            [InlineKeyboardButton("Pro Network",               callback_data="adm_pro_network")],
             [InlineKeyboardButton("Pro TOTP Control",          callback_data="adm_noop")],
             [InlineKeyboardButton("Pro TOTP Sharing Limit",    callback_data="adm_noop")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
@@ -6962,7 +6962,81 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
         await q.answer("Plan not found.", show_alert=True)
 
 
-async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+# ── Plus sub-menus ─────────────────────────────────────────────────────────────
+
+async def adm_plus_price_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("30 Day",   callback_data="adm_noop")],
+        [InlineKeyboardButton("1 Year",   callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",  callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Plan Price", reply_markup=kb)
+
+async def adm_plus_stablecoin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("USDC",    callback_data="adm_noop")],
+        [InlineKeyboardButton("USDT",    callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Stablecoin", reply_markup=kb)
+
+async def adm_plus_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Base",            callback_data="adm_noop")],
+        [InlineKeyboardButton("BNB Smart Chain", callback_data="adm_noop")],
+        [InlineKeyboardButton("Arbitrum",        callback_data="adm_noop")],
+        [InlineKeyboardButton("Polygon PoS",     callback_data="adm_noop")],
+        [InlineKeyboardButton("Optimism",        callback_data="adm_noop")],
+        [InlineKeyboardButton("Avalanche",       callback_data="adm_noop")],
+        [InlineKeyboardButton("Ethereum",        callback_data="adm_noop")],
+        [InlineKeyboardButton("Solana",          callback_data="adm_noop")],
+        [InlineKeyboardButton("Sui",             callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Network", reply_markup=kb)
+
+
+# ── Pro sub-menus ──────────────────────────────────────────────────────────────
+
+async def adm_pro_price_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("30 Day",   callback_data="adm_noop")],
+        [InlineKeyboardButton("1 Year",   callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",  callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro Plan Price", reply_markup=kb)
+
+async def adm_pro_stablecoin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("USDC",    callback_data="adm_noop")],
+        [InlineKeyboardButton("USDT",    callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro Stablecoin", reply_markup=kb)
+
+async def adm_pro_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Base",            callback_data="adm_noop")],
+        [InlineKeyboardButton("BNB Smart Chain", callback_data="adm_noop")],
+        [InlineKeyboardButton("Arbitrum",        callback_data="adm_noop")],
+        [InlineKeyboardButton("Polygon PoS",     callback_data="adm_noop")],
+        [InlineKeyboardButton("Optimism",        callback_data="adm_noop")],
+        [InlineKeyboardButton("Avalanche",       callback_data="adm_noop")],
+        [InlineKeyboardButton("Ethereum",        callback_data="adm_noop")],
+        [InlineKeyboardButton("Solana",          callback_data="adm_noop")],
+        [InlineKeyboardButton("Sui",             callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro Network", reply_markup=kb)
+
+
+# ── End Premium admin handlers ─────────────────────────────────────────────────
     """Invoice sub-menu."""
     q = update.callback_query; await q.answer()
     kb = InlineKeyboardMarkup([
@@ -9888,6 +9962,12 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_cb),                    pattern="^adm_premium$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_cb),               pattern="^adm_premium_plan$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_price_cb),                 pattern="^adm_plus_price$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_stablecoin_cb),            pattern="^adm_plus_stablecoin$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_network_cb),               pattern="^adm_plus_network$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_price_cb),                  pattern="^adm_pro_price$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_stablecoin_cb),             pattern="^adm_pro_stablecoin$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_network_cb),                pattern="^adm_pro_network$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_cb),            pattern="^adm_premium_invoice$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_check_cb),      pattern="^adm_premium_invoice_check$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_by_addr_cb),    pattern="^adm_premium_invoice_by_addr$"))
