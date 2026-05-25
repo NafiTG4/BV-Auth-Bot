@@ -5733,11 +5733,11 @@ def _adm_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton("📊 Statistics",     callback_data="adm_statistics")],
         [InlineKeyboardButton("💾 Backup",         callback_data="adm_backup"),
          InlineKeyboardButton("📋 Log",            callback_data="adm_log")],
-        [InlineKeyboardButton("🔍 Check Abuse",    callback_data="adm_check_abuse")],
-        [InlineKeyboardButton("💸 Donate",          callback_data="adm_donate")],
-        [InlineKeyboardButton("❓ Help Centre",       callback_data="adm_help_centre")],
-        [InlineKeyboardButton("📜 Terms",             callback_data="adm_terms")],
-        [InlineKeyboardButton("💡 Premium",           callback_data="adm_premium")],
+        [InlineKeyboardButton("🔍 Check Abuse",    callback_data="adm_check_abuse"),
+         InlineKeyboardButton("💸 Donate",         callback_data="adm_donate")],
+        [InlineKeyboardButton("❓ Help Centre",    callback_data="adm_help_centre"),
+         InlineKeyboardButton("📜 Terms",          callback_data="adm_terms")],
+        [InlineKeyboardButton("💡 Premium",        callback_data="adm_premium")],
     ])
 
 
@@ -6908,47 +6908,58 @@ async def adm_premium_plan_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Show plan info or subscribers of a plan group."""
-    from pricing import PLANS
+    """Show plan-specific menu with stub buttons."""
     q     = update.callback_query; await q.answer()
     group = q.data.split(":", 1)[1]   # basic / plus / pro
-    back_kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan"),
-    ]])
+
     if group == "basic":
-        await q.edit_message_text("This is free plan.", reply_markup=back_kb)
-        return
-    plan_ids = [pid for pid, p in PLANS.items() if p.get("plan_group") == group]
-    if not plan_ids:
-        await q.edit_message_text(f"No plans found for group: {group}", reply_markup=back_kb)
-        return
-    with get_db() as c:
-        rows = c.execute(
-            f"""SELECT s.vault_id, s.plan_id, s.expires_at, s.activated_at,
-                       u.tg_username, u.telegram_id
-                FROM subscriptions s
-                LEFT JOIN users u ON u.vault_id = s.vault_id
-                WHERE s.plan_id IN ({','.join('?'*len(plan_ids))})
-                  AND s.is_active = 1
-                ORDER BY s.activated_at DESC
-                LIMIT 50""",
-            plan_ids,
-        ).fetchall()
-    if not rows:
-        await q.edit_message_text(
-            f"No active {group.capitalize()} subscribers found.",
-            reply_markup=back_kb,
-        )
-        return
-    import datetime as _dt
-    lines = [f"Active {group.capitalize()} Subscribers ({len(rows)})\n"]
-    for r in rows:
-        uname = f"@{r['tg_username']}" if r["tg_username"] else str(r["telegram_id"])
-        exp   = (_dt.datetime.utcfromtimestamp(r["expires_at"]).strftime("%d %b %Y")
-                 if r["expires_at"] else "Lifetime")
-        plan_label = r["plan_id"].replace("_", " ").replace("plus", "Plus").replace("pro", "Pro").replace("30", "30 Day").replace("year", "1 Year")
-        lines.append(f"• {r['vault_id']}  ({uname})\n  Plan: {plan_label}  |  Expires: {exp}")
-    await q.edit_message_text("\n".join(lines), reply_markup=back_kb)
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Set Basic Message",         callback_data="adm_noop")],
+            [InlineKeyboardButton("Basic Full User Export",    callback_data="adm_noop")],
+            [InlineKeyboardButton("Basic TOTP Control",        callback_data="adm_noop")],
+            [InlineKeyboardButton("Basic TOTP Sharing Limit",  callback_data="adm_noop")],
+            [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
+            [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
+            [InlineKeyboardButton("⬅️ Back",                   callback_data="adm_premium_plan")],
+        ])
+        await q.edit_message_text("Basic Plan", reply_markup=kb)
+
+    elif group == "plus":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Plus Plan",                 callback_data="adm_noop")],
+            [InlineKeyboardButton("Add Plus User",             callback_data="adm_noop")],
+            [InlineKeyboardButton("Set Plus Message",          callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus Plan Price",           callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus Stablecoin",           callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus Network",              callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus TOTP Control",         callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus TOTP Sharing Limit",   callback_data="adm_noop")],
+            [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus Full User Export",     callback_data="adm_noop")],
+            [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
+            [InlineKeyboardButton("⬅️ Back",                   callback_data="adm_premium_plan")],
+        ])
+        await q.edit_message_text("Plus Plan", reply_markup=kb)
+
+    elif group == "pro":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Pro Plan",                  callback_data="adm_noop")],
+            [InlineKeyboardButton("Add Pro User",              callback_data="adm_noop")],
+            [InlineKeyboardButton("Set Pro Message",           callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro Plan Price",            callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro Stablecoin",            callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro Network",               callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro TOTP Control",          callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro TOTP Sharing Limit",    callback_data="adm_noop")],
+            [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro Full User Export",      callback_data="adm_noop")],
+            [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
+            [InlineKeyboardButton("⬅️ Back",                   callback_data="adm_premium_plan")],
+        ])
+        await q.edit_message_text("Pro Plan", reply_markup=kb)
+
+    else:
+        await q.answer("Plan not found.", show_alert=True)
 
 
 async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
