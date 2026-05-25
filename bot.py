@@ -7036,6 +7036,16 @@ async def adm_pro_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("Pro Network", reply_markup=kb)
 
 
+# ── End Premium admin handlers ─────────────────────────────────────────────────
+    """Invoice sub-menu."""
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔍 Check Invoice Information", callback_data="adm_premium_invoice_check")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium")],
+    ])
+    await q.edit_message_text("🧾 Invoice", reply_markup=kb)
+
+
 async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Invoice sub-menu."""
     q = update.callback_query; await q.answer()
