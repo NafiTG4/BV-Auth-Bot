@@ -7036,7 +7036,7 @@ async def adm_pro_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("Pro Network", reply_markup=kb)
 
 
-# ── End Premium admin handlers ─────────────────────────────────────────────────
+async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Invoice sub-menu."""
     q = update.callback_query; await q.answer()
     kb = InlineKeyboardMarkup([
