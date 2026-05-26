@@ -6890,6 +6890,7 @@ async def adm_premium_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Plan",    callback_data="adm_premium_plan")],
         [InlineKeyboardButton("🧾 Invoice", callback_data="adm_premium_invoice")],
+        [InlineKeyboardButton("🔌 API",     callback_data="adm_noop")],
         [InlineKeyboardButton("⬅️ Back",    callback_data="adm_back")],
     ])
     await q.edit_message_text("💡 Premium", reply_markup=kb)
@@ -6916,7 +6917,7 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("Set Basic Message",         callback_data="adm_noop")],
             [InlineKeyboardButton("Basic Full User Export",    callback_data="adm_noop")],
-            [InlineKeyboardButton("Basic TOTP Control",        callback_data="adm_noop")],
+            [InlineKeyboardButton("Basic TOTP Control",        callback_data="adm_basic_totp_control")],
             [InlineKeyboardButton("Basic TOTP Sharing Limit",  callback_data="adm_noop")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
             [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
@@ -6927,12 +6928,12 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
     elif group == "plus":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("Plus Plan",                 callback_data="adm_noop")],
-            [InlineKeyboardButton("Add Plus User",             callback_data="adm_noop")],
+            [InlineKeyboardButton("Add Plus User",             callback_data="adm_add_plus_user")],
             [InlineKeyboardButton("Set Plus Message",          callback_data="adm_noop")],
             [InlineKeyboardButton("Plus Plan Price",           callback_data="adm_plus_price")],
             [InlineKeyboardButton("Plus Stablecoin",           callback_data="adm_plus_stablecoin")],
             [InlineKeyboardButton("Plus Network",              callback_data="adm_plus_network")],
-            [InlineKeyboardButton("Plus TOTP Control",         callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus TOTP Control",         callback_data="adm_plus_totp_control")],
             [InlineKeyboardButton("Plus TOTP Sharing Limit",   callback_data="adm_noop")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
             [InlineKeyboardButton("Plus Full User Export",     callback_data="adm_noop")],
@@ -6944,12 +6945,12 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
     elif group == "pro":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("Pro Plan",                  callback_data="adm_noop")],
-            [InlineKeyboardButton("Add Pro User",              callback_data="adm_noop")],
+            [InlineKeyboardButton("Add Pro User",              callback_data="adm_add_pro_user")],
             [InlineKeyboardButton("Set Pro Message",           callback_data="adm_noop")],
             [InlineKeyboardButton("Pro Plan Price",            callback_data="adm_pro_price")],
             [InlineKeyboardButton("Pro Stablecoin",            callback_data="adm_pro_stablecoin")],
             [InlineKeyboardButton("Pro Network",               callback_data="adm_pro_network")],
-            [InlineKeyboardButton("Pro TOTP Control",          callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro TOTP Control",          callback_data="adm_pro_totp_control")],
             [InlineKeyboardButton("Pro TOTP Sharing Limit",    callback_data="adm_noop")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
             [InlineKeyboardButton("Pro Full User Export",      callback_data="adm_noop")],
@@ -6963,6 +6964,27 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
 
 # ── Plus sub-menus ─────────────────────────────────────────────────────────────
+
+async def adm_add_plus_user_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("30 Day",   callback_data="adm_noop")],
+        [InlineKeyboardButton("1 Year",   callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",  callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Add Plus User", reply_markup=kb)
+
+async def adm_plus_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("TOTP Add",                              callback_data="adm_noop")],
+        [InlineKeyboardButton("Vault TOTP Max limit",                  callback_data="adm_noop")],
+        [InlineKeyboardButton("Vault TOTP add limit per min",          callback_data="adm_noop")],
+        [InlineKeyboardButton("Specific User Vault Max limit",         callback_data="adm_noop")],
+        [InlineKeyboardButton("Specific User TOTP add limit per min",  callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",                               callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus TOTP Control", reply_markup=kb)
 
 async def adm_plus_price_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
@@ -7001,6 +7023,27 @@ async def adm_plus_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Pro sub-menus ──────────────────────────────────────────────────────────────
 
+async def adm_add_pro_user_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("30 Day",   callback_data="adm_noop")],
+        [InlineKeyboardButton("1 Year",   callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",  callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Add Pro User", reply_markup=kb)
+
+async def adm_pro_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("TOTP Add",                              callback_data="adm_noop")],
+        [InlineKeyboardButton("Vault TOTP Max limit",                  callback_data="adm_noop")],
+        [InlineKeyboardButton("Vault TOTP add limit per min",          callback_data="adm_noop")],
+        [InlineKeyboardButton("Specific User Vault Max limit",         callback_data="adm_noop")],
+        [InlineKeyboardButton("Specific User TOTP add limit per min",  callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",                               callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro TOTP Control", reply_markup=kb)
+
 async def adm_pro_price_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     kb = InlineKeyboardMarkup([
@@ -7036,14 +7079,20 @@ async def adm_pro_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("Pro Network", reply_markup=kb)
 
 
-# ── End Premium admin handlers ─────────────────────────────────────────────────
-    """Invoice sub-menu."""
+async def adm_basic_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔍 Check Invoice Information", callback_data="adm_premium_invoice_check")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium")],
+        [InlineKeyboardButton("TOTP Add",                              callback_data="adm_noop")],
+        [InlineKeyboardButton("Vault TOTP Max limit",                  callback_data="adm_noop")],
+        [InlineKeyboardButton("Vault TOTP add limit per min",          callback_data="adm_noop")],
+        [InlineKeyboardButton("Specific User Vault Max limit",         callback_data="adm_noop")],
+        [InlineKeyboardButton("Specific User TOTP add limit per min",  callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",                               callback_data="adm_premium_plan_view:basic")],
     ])
-    await q.edit_message_text("🧾 Invoice", reply_markup=kb)
+    await q.edit_message_text("Basic TOTP Control", reply_markup=kb)
+
+
+# ── ADMIN: Premium Invoice ─────────────────────────────────────────────────────
 
 
 async def adm_premium_invoice_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -9972,6 +10021,11 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_cb),                    pattern="^adm_premium$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_cb),               pattern="^adm_premium_plan$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_add_plus_user_cb),              pattern="^adm_add_plus_user$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_totp_control_cb),          pattern="^adm_plus_totp_control$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_add_pro_user_cb),               pattern="^adm_add_pro_user$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_totp_control_cb),           pattern="^adm_pro_totp_control$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_basic_totp_control_cb),         pattern="^adm_basic_totp_control$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_price_cb),                 pattern="^adm_plus_price$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_stablecoin_cb),            pattern="^adm_plus_stablecoin$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_network_cb),               pattern="^adm_plus_network$"))
