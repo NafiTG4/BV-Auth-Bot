@@ -6890,7 +6890,7 @@ async def adm_premium_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Plan",    callback_data="adm_premium_plan")],
         [InlineKeyboardButton("🧾 Invoice", callback_data="adm_premium_invoice")],
-        [InlineKeyboardButton("🔌 API",     callback_data="adm_noop")],
+        [InlineKeyboardButton("🔌 API",     callback_data="adm_premium_api")],
         [InlineKeyboardButton("⬅️ Back",    callback_data="adm_back")],
     ])
     await q.edit_message_text("💡 Premium", reply_markup=kb)
@@ -6915,7 +6915,7 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
     if group == "basic":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Set Basic Message",         callback_data="adm_noop")],
+            [InlineKeyboardButton("Set Basic Message",         callback_data="adm_set_basic_msg")],
             [InlineKeyboardButton("Basic Full User Export",    callback_data="adm_noop")],
             [InlineKeyboardButton("Basic TOTP Control",        callback_data="adm_basic_totp_control")],
             [InlineKeyboardButton("Basic TOTP Sharing Limit",  callback_data="adm_noop")],
@@ -7079,6 +7079,25 @@ async def adm_pro_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text("Pro Network", reply_markup=kb)
 
 
+# ── Premium API sub-menus ──────────────────────────────────────────────────────
+
+async def adm_premium_api_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Transaction Check", callback_data="adm_premium_api_txcheck")],
+        [InlineKeyboardButton("⬅️ Back",           callback_data="adm_premium")],
+    ])
+    await q.edit_message_text("🔌 API", reply_markup=kb)
+
+async def adm_premium_api_txcheck_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Set Alchemy API", callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_api")],
+    ])
+    await q.edit_message_text("Transaction Check", reply_markup=kb)
+
+
 async def adm_basic_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     kb = InlineKeyboardMarkup([
@@ -7090,6 +7109,15 @@ async def adm_basic_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("⬅️ Back",                               callback_data="adm_premium_plan_view:basic")],
     ])
     await q.edit_message_text("Basic TOTP Control", reply_markup=kb)
+
+
+async def adm_set_basic_msg_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send the Basic plan message."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_set_basic_msg_wait"}
+    await q.edit_message_text(
+        "Send the message you want to show users when they click on the Basic plan."
+    )
 
 
 # ── ADMIN: Premium Invoice ─────────────────────────────────────────────────────
@@ -8434,6 +8462,19 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             lines.append("")
         msg = await update.message.reply_text("\n".join(lines))
         asyncio.create_task(auto_delete_msg(msg, delay=300))
+        return
+
+    if step == "adm_set_basic_msg_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        raw_text = update.message.text or ""
+        if not raw_text.strip():
+            msg = await update.message.reply_text("Message cannot be empty.")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting("basic_plan_message", raw_text.strip())
+        success_msg = await ctx.bot.send_message(chat_id=chat_id, text="✅ Basic plan message saved.")
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
         return
 
     if step == "adm_set_maintenance_msg_wait":
@@ -10021,6 +10062,9 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_cb),                    pattern="^adm_premium$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_cb),               pattern="^adm_premium_plan$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_cb),                pattern="^adm_premium_api$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_txcheck_cb),        pattern="^adm_premium_api_txcheck$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_basic_msg_cb),              pattern="^adm_set_basic_msg$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_add_plus_user_cb),              pattern="^adm_add_plus_user$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_totp_control_cb),          pattern="^adm_plus_totp_control$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_add_pro_user_cb),               pattern="^adm_add_pro_user$"))
