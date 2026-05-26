@@ -851,8 +851,21 @@ async def cb_sub_plan_detail(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q     = update.callback_query; await q.answer()
     group = q.data.split(":", 1)[1]
     if group == "basic":
+        # Show admin-set Basic message if available, else default
+        basic_msg = None
+        try:
+            from bot import get_db
+            with get_db() as db:
+                row = db.execute(
+                    "SELECT value FROM bot_settings WHERE key='basic_plan_message'"
+                ).fetchone()
+            if row and row["value"]:
+                basic_msg = row["value"]
+        except Exception:
+            pass
+        display_text = basic_msg if basic_msg else "This is free plan"
         await q.edit_message_text(
-            "This is free plan",
+            display_text,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("⬅️ Back", callback_data="sub_plans"),
             ]]),
