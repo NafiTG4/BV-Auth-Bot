@@ -6929,7 +6929,7 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("Plus Plan",                 callback_data="adm_noop")],
             [InlineKeyboardButton("Add Plus User",             callback_data="adm_add_plus_user")],
-            [InlineKeyboardButton("Set Plus Message",          callback_data="adm_noop")],
+            [InlineKeyboardButton("Set Plus Message",          callback_data="adm_set_plus_msg")],
             [InlineKeyboardButton("Plus Plan Price",           callback_data="adm_plus_price")],
             [InlineKeyboardButton("Plus Stablecoin",           callback_data="adm_plus_stablecoin")],
             [InlineKeyboardButton("Plus Network",              callback_data="adm_plus_network")],
@@ -6946,7 +6946,7 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("Pro Plan",                  callback_data="adm_noop")],
             [InlineKeyboardButton("Add Pro User",              callback_data="adm_add_pro_user")],
-            [InlineKeyboardButton("Set Pro Message",           callback_data="adm_noop")],
+            [InlineKeyboardButton("Set Pro Message",           callback_data="adm_set_pro_msg")],
             [InlineKeyboardButton("Pro Plan Price",            callback_data="adm_pro_price")],
             [InlineKeyboardButton("Pro Stablecoin",            callback_data="adm_pro_stablecoin")],
             [InlineKeyboardButton("Pro Network",               callback_data="adm_pro_network")],
@@ -6988,37 +6988,84 @@ async def adm_plus_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
 async def adm_plus_price_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    from pricing import get_plan_price
+    p30   = get_plan_price("plus_30")
+    pyear = get_plan_price("plus_year")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("30 Day",   callback_data="adm_noop")],
-        [InlineKeyboardButton("1 Year",   callback_data="adm_noop")],
-        [InlineKeyboardButton("⬅️ Back",  callback_data="adm_premium_plan_view:plus")],
+        [InlineKeyboardButton(f"30 Day (${p30:.2f})",   callback_data="adm_plus_price_set:plus_30")],
+        [InlineKeyboardButton(f"1 Year (${pyear:.2f})", callback_data="adm_plus_price_set:plus_year")],
+        [InlineKeyboardButton("⬅️ Back",                callback_data="adm_premium_plan_view:plus")],
     ])
-    await q.edit_message_text("Plus Plan Price", reply_markup=kb)
+    await q.edit_message_text("Plus Plan Price\n\nSelect duration to update price:", reply_markup=kb)
+
+async def adm_plus_price_set_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q       = update.callback_query; await q.answer()
+    plan_id = q.data.split(":", 1)[1]
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_plan_price_wait", "plan_id": plan_id}
+    dur = "30 Days" if "30" in plan_id else "1 Year"
+    await q.edit_message_text(f"Send the new price (USD) for Plus {dur}.\nExample: 1.99")
 
 async def adm_plus_stablecoin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    from pricing import is_token_enabled
+    usdc_on = is_token_enabled("plus", "USDC")
+    usdt_on = is_token_enabled("plus", "USDT")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("USDC",    callback_data="adm_noop")],
-        [InlineKeyboardButton("USDT",    callback_data="adm_noop")],
+        [InlineKeyboardButton(f"USDC {'✅' if usdc_on else '❌'}", callback_data="adm_plus_token_toggle:USDC")],
+        [InlineKeyboardButton(f"USDT {'✅' if usdt_on else '❌'}", callback_data="adm_plus_token_toggle:USDT")],
         [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")],
     ])
-    await q.edit_message_text("Plus Stablecoin", reply_markup=kb)
+    await q.edit_message_text("Plus Stablecoin\n\nClick to toggle on/off:", reply_markup=kb)
+
+async def adm_plus_token_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q     = update.callback_query; await q.answer()
+    token = q.data.split(":", 1)[1]
+    from pricing import is_token_enabled
+    current = is_token_enabled("plus", token)
+    _save_setting(f"plus_{token.lower()}_enabled", "0" if current else "1")
+    # Refresh the menu
+    usdc_on = is_token_enabled("plus", "USDC")
+    usdt_on = is_token_enabled("plus", "USDT")
+    # Re-read after save
+    usdc_on = not usdc_on if token == "USDC" else usdc_on
+    usdt_on = not usdt_on if token == "USDT" else usdt_on
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"USDC {'✅' if usdc_on else '❌'}", callback_data="adm_plus_token_toggle:USDC")],
+        [InlineKeyboardButton(f"USDT {'✅' if usdt_on else '❌'}", callback_data="adm_plus_token_toggle:USDT")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Stablecoin\n\nClick to toggle on/off:", reply_markup=kb)
 
 async def adm_plus_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Base",            callback_data="adm_noop")],
-        [InlineKeyboardButton("BNB Smart Chain", callback_data="adm_noop")],
-        [InlineKeyboardButton("Arbitrum",        callback_data="adm_noop")],
-        [InlineKeyboardButton("Polygon PoS",     callback_data="adm_noop")],
-        [InlineKeyboardButton("Optimism",        callback_data="adm_noop")],
-        [InlineKeyboardButton("Avalanche",       callback_data="adm_noop")],
-        [InlineKeyboardButton("Ethereum",        callback_data="adm_noop")],
-        [InlineKeyboardButton("Solana",          callback_data="adm_noop")],
-        [InlineKeyboardButton("Sui",             callback_data="adm_noop")],
-        [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_plan_view:plus")],
-    ])
-    await q.edit_message_text("Plus Network", reply_markup=kb)
+    from pricing import SUPPORTED_CHAINS, is_network_enabled
+    buttons = []
+    for chain in SUPPORTED_CHAINS:
+        on = is_network_enabled("plus", chain["id"])
+        buttons.append([InlineKeyboardButton(
+            f"{chain['logo']} {chain['name']} {'✅' if on else '❌'}",
+            callback_data=f"adm_plus_net_toggle:{chain['id']}",
+        )])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")])
+    await q.edit_message_text("Plus Network\n\nClick to toggle on/off:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def adm_plus_net_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q        = update.callback_query; await q.answer()
+    chain_id = q.data.split(":", 1)[1]
+    from pricing import SUPPORTED_CHAINS, is_network_enabled
+    current = is_network_enabled("plus", chain_id)
+    _save_setting(f"plus_network_{chain_id}", "0" if current else "1")
+    buttons = []
+    for chain in SUPPORTED_CHAINS:
+        on = is_network_enabled("plus", chain["id"])
+        if chain["id"] == chain_id:
+            on = not current
+        buttons.append([InlineKeyboardButton(
+            f"{chain['logo']} {chain['name']} {'✅' if on else '❌'}",
+            callback_data=f"adm_plus_net_toggle:{chain['id']}",
+        )])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")])
+    await q.edit_message_text("Plus Network\n\nClick to toggle on/off:", reply_markup=InlineKeyboardMarkup(buttons))
 
 
 # ── Pro sub-menus ──────────────────────────────────────────────────────────────
@@ -7046,37 +7093,82 @@ async def adm_pro_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 
 async def adm_pro_price_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    from pricing import get_plan_price
+    p30   = get_plan_price("pro_30")
+    pyear = get_plan_price("pro_year")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("30 Day",   callback_data="adm_noop")],
-        [InlineKeyboardButton("1 Year",   callback_data="adm_noop")],
-        [InlineKeyboardButton("⬅️ Back",  callback_data="adm_premium_plan_view:pro")],
+        [InlineKeyboardButton(f"30 Day (${p30:.2f})",   callback_data="adm_pro_price_set:pro_30")],
+        [InlineKeyboardButton(f"1 Year (${pyear:.2f})", callback_data="adm_pro_price_set:pro_year")],
+        [InlineKeyboardButton("⬅️ Back",                callback_data="adm_premium_plan_view:pro")],
     ])
-    await q.edit_message_text("Pro Plan Price", reply_markup=kb)
+    await q.edit_message_text("Pro Plan Price\n\nSelect duration to update price:", reply_markup=kb)
+
+async def adm_pro_price_set_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q       = update.callback_query; await q.answer()
+    plan_id = q.data.split(":", 1)[1]
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_plan_price_wait", "plan_id": plan_id}
+    dur = "30 Days" if "30" in plan_id else "1 Year"
+    await q.edit_message_text(f"Send the new price (USD) for Pro {dur}.\nExample: 2.99")
 
 async def adm_pro_stablecoin_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    from pricing import is_token_enabled
+    usdc_on = is_token_enabled("pro", "USDC")
+    usdt_on = is_token_enabled("pro", "USDT")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("USDC",    callback_data="adm_noop")],
-        [InlineKeyboardButton("USDT",    callback_data="adm_noop")],
+        [InlineKeyboardButton(f"USDC {'✅' if usdc_on else '❌'}", callback_data="adm_pro_token_toggle:USDC")],
+        [InlineKeyboardButton(f"USDT {'✅' if usdt_on else '❌'}", callback_data="adm_pro_token_toggle:USDT")],
         [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")],
     ])
-    await q.edit_message_text("Pro Stablecoin", reply_markup=kb)
+    await q.edit_message_text("Pro Stablecoin\n\nClick to toggle on/off:", reply_markup=kb)
+
+async def adm_pro_token_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q     = update.callback_query; await q.answer()
+    token = q.data.split(":", 1)[1]
+    from pricing import is_token_enabled
+    current = is_token_enabled("pro", token)
+    _save_setting(f"pro_{token.lower()}_enabled", "0" if current else "1")
+    usdc_on = is_token_enabled("pro", "USDC")
+    usdt_on = is_token_enabled("pro", "USDT")
+    usdc_on = not usdc_on if token == "USDC" else usdc_on
+    usdt_on = not usdt_on if token == "USDT" else usdt_on
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"USDC {'✅' if usdc_on else '❌'}", callback_data="adm_pro_token_toggle:USDC")],
+        [InlineKeyboardButton(f"USDT {'✅' if usdt_on else '❌'}", callback_data="adm_pro_token_toggle:USDT")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro Stablecoin\n\nClick to toggle on/off:", reply_markup=kb)
 
 async def adm_pro_network_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Base",            callback_data="adm_noop")],
-        [InlineKeyboardButton("BNB Smart Chain", callback_data="adm_noop")],
-        [InlineKeyboardButton("Arbitrum",        callback_data="adm_noop")],
-        [InlineKeyboardButton("Polygon PoS",     callback_data="adm_noop")],
-        [InlineKeyboardButton("Optimism",        callback_data="adm_noop")],
-        [InlineKeyboardButton("Avalanche",       callback_data="adm_noop")],
-        [InlineKeyboardButton("Ethereum",        callback_data="adm_noop")],
-        [InlineKeyboardButton("Solana",          callback_data="adm_noop")],
-        [InlineKeyboardButton("Sui",             callback_data="adm_noop")],
-        [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_plan_view:pro")],
-    ])
-    await q.edit_message_text("Pro Network", reply_markup=kb)
+    from pricing import SUPPORTED_CHAINS, is_network_enabled
+    buttons = []
+    for chain in SUPPORTED_CHAINS:
+        on = is_network_enabled("pro", chain["id"])
+        buttons.append([InlineKeyboardButton(
+            f"{chain['logo']} {chain['name']} {'✅' if on else '❌'}",
+            callback_data=f"adm_pro_net_toggle:{chain['id']}",
+        )])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")])
+    await q.edit_message_text("Pro Network\n\nClick to toggle on/off:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def adm_pro_net_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q        = update.callback_query; await q.answer()
+    chain_id = q.data.split(":", 1)[1]
+    from pricing import SUPPORTED_CHAINS, is_network_enabled
+    current = is_network_enabled("pro", chain_id)
+    _save_setting(f"pro_network_{chain_id}", "0" if current else "1")
+    buttons = []
+    for chain in SUPPORTED_CHAINS:
+        on = is_network_enabled("pro", chain["id"])
+        if chain["id"] == chain_id:
+            on = not current
+        buttons.append([InlineKeyboardButton(
+            f"{chain['logo']} {chain['name']} {'✅' if on else '❌'}",
+            callback_data=f"adm_pro_net_toggle:{chain['id']}",
+        )])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")])
+    await q.edit_message_text("Pro Network\n\nClick to toggle on/off:", reply_markup=InlineKeyboardMarkup(buttons))
 
 
 # ── Premium API sub-menus ──────────────────────────────────────────────────────
@@ -7091,11 +7183,31 @@ async def adm_premium_api_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def adm_premium_api_txcheck_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
+    # Show current API key status
+    with get_db() as c:
+        row = c.execute("SELECT value FROM bot_settings WHERE key='alchemy_api_key'").fetchone()
+    current = row["value"] if row and row["value"] else None
+    if current:
+        display = f"Current: {current[:6]}...{current[-4:]}"
+    else:
+        display = "Not set"
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Set Alchemy API", callback_data="adm_noop")],
+        [InlineKeyboardButton("Set Alchemy API", callback_data="adm_set_alchemy_api")],
         [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_api")],
     ])
-    await q.edit_message_text("Transaction Check", reply_markup=kb)
+    await q.edit_message_text(
+        f"Transaction Check\n\nAlchemy API Key: {display}",
+        reply_markup=kb,
+    )
+
+
+async def adm_set_alchemy_api_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send the Alchemy API key."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_set_alchemy_api_wait"}
+    await q.edit_message_text(
+        "Send your Alchemy API key.\nThe current key will be replaced."
+    )
 
 
 async def adm_basic_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -7117,6 +7229,22 @@ async def adm_set_basic_msg_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     _admin_import_pending[update.effective_chat.id] = {"step": "adm_set_basic_msg_wait"}
     await q.edit_message_text(
         "Send the message you want to show users when they click on the Basic plan."
+    )
+
+async def adm_set_plus_msg_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send the Plus plan message."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_set_plus_msg_wait"}
+    await q.edit_message_text(
+        "Send the message you want to show users when they click on the Plus plan."
+    )
+
+async def adm_set_pro_msg_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send the Pro plan message."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_set_pro_msg_wait"}
+    await q.edit_message_text(
+        "Send the message you want to show users when they click on the Pro plan."
     )
 
 
@@ -8464,6 +8592,46 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
         asyncio.create_task(auto_delete_msg(msg, delay=300))
         return
 
+    if step == "adm_plan_price_wait":
+        plan_id = state.get("plan_id", "")
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        if not plan_id:
+            return
+        try:
+            new_price = float(raw.strip().replace(",", "."))
+            if new_price <= 0:
+                raise ValueError
+        except ValueError:
+            msg = await update.message.reply_text("Invalid price. Send a positive number like 1.99")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting(f"plan_price_{plan_id}", str(new_price))
+        dur = "30 Days" if "30" in plan_id else "1 Year"
+        group = "Plus" if "plus" in plan_id else "Pro"
+        success_msg = await ctx.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ {group} {dur} price updated to ${new_price:.2f}",
+        )
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
+        return
+
+    if step == "adm_set_alchemy_api_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        api_key = raw.strip()
+        if not api_key:
+            msg = await update.message.reply_text("API key cannot be empty.")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting("alchemy_api_key", api_key)
+        success_msg = await ctx.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Alchemy API key saved: {api_key[:6]}...{api_key[-4:]}",
+        )
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
+        return
+
     if step == "adm_set_basic_msg_wait":
         _admin_import_pending.pop(chat_id, None)
         asyncio.create_task(auto_delete_msg(update.message, delay=5))
@@ -8474,6 +8642,32 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             return
         _save_setting("basic_plan_message", raw_text.strip())
         success_msg = await ctx.bot.send_message(chat_id=chat_id, text="✅ Basic plan message saved.")
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
+        return
+
+    if step == "adm_set_plus_msg_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        raw_text = update.message.text or ""
+        if not raw_text.strip():
+            msg = await update.message.reply_text("Message cannot be empty.")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting("plus_plan_message", raw_text.strip())
+        success_msg = await ctx.bot.send_message(chat_id=chat_id, text="✅ Plus plan message saved.")
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
+        return
+
+    if step == "adm_set_pro_msg_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        raw_text = update.message.text or ""
+        if not raw_text.strip():
+            msg = await update.message.reply_text("Message cannot be empty.")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting("pro_plan_message", raw_text.strip())
+        success_msg = await ctx.bot.send_message(chat_id=chat_id, text="✅ Pro plan message saved.")
         asyncio.create_task(auto_delete_msg(success_msg, delay=10))
         return
 
@@ -10064,18 +10258,27 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_cb),                pattern="^adm_premium_api$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_txcheck_cb),        pattern="^adm_premium_api_txcheck$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_alchemy_api_cb),            pattern="^adm_set_alchemy_api$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_basic_msg_cb),              pattern="^adm_set_basic_msg$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_plus_msg_cb),               pattern="^adm_set_plus_msg$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_pro_msg_cb),                pattern="^adm_set_pro_msg$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_add_plus_user_cb),              pattern="^adm_add_plus_user$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_totp_control_cb),          pattern="^adm_plus_totp_control$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_add_pro_user_cb),               pattern="^adm_add_pro_user$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_totp_control_cb),           pattern="^adm_pro_totp_control$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_basic_totp_control_cb),         pattern="^adm_basic_totp_control$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_price_cb),                 pattern="^adm_plus_price$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_price_set_cb),             pattern="^adm_plus_price_set:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_stablecoin_cb),            pattern="^adm_plus_stablecoin$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_token_toggle_cb),          pattern="^adm_plus_token_toggle:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_network_cb),               pattern="^adm_plus_network$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_net_toggle_cb),            pattern="^adm_plus_net_toggle:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_price_cb),                  pattern="^adm_pro_price$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_price_set_cb),              pattern="^adm_pro_price_set:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_stablecoin_cb),             pattern="^adm_pro_stablecoin$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_token_toggle_cb),           pattern="^adm_pro_token_toggle:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_network_cb),                pattern="^adm_pro_network$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_net_toggle_cb),             pattern="^adm_pro_net_toggle:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_cb),            pattern="^adm_premium_invoice$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_check_cb),      pattern="^adm_premium_invoice_check$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_invoice_by_addr_cb),    pattern="^adm_premium_invoice_by_addr$"))
