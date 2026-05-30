@@ -6929,12 +6929,25 @@ async def adm_premium_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Premium main menu — Plan and Invoice."""
     q = update.callback_query; await q.answer()
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Plan",    callback_data="adm_premium_plan")],
-        [InlineKeyboardButton("🧾 Invoice", callback_data="adm_premium_invoice")],
-        [InlineKeyboardButton("🔌 API",     callback_data="adm_premium_api")],
-        [InlineKeyboardButton("⬅️ Back",    callback_data="adm_back")],
+        [InlineKeyboardButton("📋 Plan",              callback_data="adm_premium_plan")],
+        [InlineKeyboardButton("🧾 Invoice",           callback_data="adm_premium_invoice")],
+        [InlineKeyboardButton("🔌 API",               callback_data="adm_premium_api")],
+        [InlineKeyboardButton("🔐 Wallet Private Info", callback_data="adm_premium_wallet")],
+        [InlineKeyboardButton("⬅️ Back",              callback_data="adm_back")],
     ])
     await q.edit_message_text("💡 Premium", reply_markup=kb)
+
+
+async def adm_premium_wallet_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Wallet Private Info stub menu."""
+    q = update.callback_query; await q.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Get Single Private Key", callback_data="adm_noop")],
+        [InlineKeyboardButton("Export All Address",     callback_data="adm_noop")],
+        [InlineKeyboardButton("Check Address Balance",  callback_data="adm_noop")],
+        [InlineKeyboardButton("⬅️ Back",                callback_data="adm_premium")],
+    ])
+    await q.edit_message_text("🔐 Wallet Private Info", reply_markup=kb)
 
 
 async def adm_premium_plan_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -7350,8 +7363,9 @@ async def adm_premium_api_txcheck_cb(update: Update, ctx: ContextTypes.DEFAULT_T
     else:
         display = "Not set"
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Set Alchemy API", callback_data="adm_set_alchemy_api")],
-        [InlineKeyboardButton("⬅️ Back",         callback_data="adm_premium_api")],
+        [InlineKeyboardButton("Set Alchemy API",        callback_data="adm_set_alchemy_api")],
+        [InlineKeyboardButton("Set Solana Helius API",  callback_data="adm_set_helius_api")],
+        [InlineKeyboardButton("⬅️ Back",                callback_data="adm_premium_api")],
     ])
     await q.edit_message_text(
         f"Transaction Check\n\nAlchemy API Key: {display}",
@@ -7366,6 +7380,13 @@ async def adm_set_alchemy_api_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
     await q.edit_message_text(
         "Send your Alchemy API key.\nThe current key will be replaced."
     )
+
+
+async def adm_set_helius_api_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ask admin to send the Helius API key for Solana."""
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_set_helius_api_wait"}
+    await q.edit_message_text("Send your Helius API key for Solana transaction verification.")
 
 
 async def adm_basic_totp_control_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -8786,6 +8807,22 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
         success_msg = await ctx.bot.send_message(
             chat_id=chat_id,
             text=f"✅ {group} {dur} price updated to ${new_price:.2f}",
+        )
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
+        return
+
+    if step == "adm_set_helius_api_wait":
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        api_key = raw.strip()
+        if not api_key:
+            msg = await update.message.reply_text("API key cannot be empty.")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting("helius_api_key", api_key)
+        success_msg = await ctx.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Helius (Solana) API key saved: {api_key[:6]}...{api_key[-4:]}",
         )
         asyncio.create_task(auto_delete_msg(success_msg, delay=10))
         return
@@ -10428,6 +10465,7 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_specific_vault_min_cb),pattern="^adm_specific_vault_min$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_back_cb),              pattern="^adm_back$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_cb),                    pattern="^adm_premium$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_wallet_cb),             pattern="^adm_premium_wallet$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_cb),               pattern="^adm_premium_plan$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_plan_toggle_cb),           pattern="^adm_plus_plan_toggle$"))
@@ -10441,6 +10479,7 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_cb),                pattern="^adm_premium_api$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_txcheck_cb),        pattern="^adm_premium_api_txcheck$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_alchemy_api_cb),            pattern="^adm_set_alchemy_api$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_helius_api_cb),             pattern="^adm_set_helius_api$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_basic_msg_cb),              pattern="^adm_set_basic_msg$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_plus_msg_cb),               pattern="^adm_set_plus_msg$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_pro_msg_cb),                pattern="^adm_set_pro_msg$"))
