@@ -1249,6 +1249,19 @@ def _save_setting(key: str, value):
         c.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?,?)", (key, str_val))
         c.commit()
 
+def _load_setting(key: str, default: str = "") -> str:
+    """Read a single setting from DB. Returns default if not found."""
+    if key in _bot_settings and _bot_settings[key] is not None:
+        return str(_bot_settings[key])
+    try:
+        with get_db() as c:
+            row = c.execute("SELECT value FROM bot_settings WHERE key=?", (key,)).fetchone()
+        if row and row["value"] is not None:
+            return str(row["value"])
+    except Exception:
+        pass
+    return default
+
 def is_maintenance() -> bool:
     return bool(_bot_settings.get("maintenance", False))
 
@@ -4499,6 +4512,21 @@ async def share_generate(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(selected) > SHARE_MAX_TOTP:
         await q.answer(f"Maximum {SHARE_MAX_TOTP} accounts allowed per share.", show_alert=True)
         return TOTP_MENU
+    # Check daily share limit based on user's plan
+    from pricing import get_share_limit, get_active_subscription
+    with get_db() as _sc:
+        sub = get_active_subscription(_sc, vault)
+    plan_group = sub["plan_id"].split("_")[0] if sub else "basic"
+    daily_limit = get_share_limit(plan_group)
+    today_str   = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    share_count_key = f"share_daily_{vault}_{today_str}"
+    used = int(_load_setting(share_count_key, "0"))
+    if used >= daily_limit:
+        await q.answer(
+            "Please upgrade your plan or contact support.",
+            show_alert=True,
+        )
+        return TOTP_MENU
     # Use share_all (all pages), not just current page rows
     all_rows_for_share = ctx.user_data.get("share_all", rows)
     selected_ids = [r["id"] for r in all_rows_for_share if r["id"] in selected]
@@ -4540,6 +4568,8 @@ async def share_generate(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
              json.dumps(final_names), expires_at),
         )
         c.commit()
+    # Increment daily share counter
+    _save_setting(share_count_key, str(used + 1))
     async def _cleanup():
         await asyncio.sleep(SHARE_LINK_TTL + 5)
         with get_db() as c2:
@@ -5487,6 +5517,17 @@ async def global_auto_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Update last_seen for every message interaction
     if vault:
         update_last_seen(uid)
+    # Check if global detect is enabled for this user's plan
+    if vault:
+        try:
+            from pricing import get_active_subscription, is_global_detect_enabled
+            with get_db() as _gdc:
+                sub = get_active_subscription(_gdc, vault)
+            plan_group = sub["plan_id"].split("_")[0] if sub else "basic"
+            if not is_global_detect_enabled(plan_group):
+                return
+        except Exception:
+            pass
     # If TOTP add is globally disabled, block QR/otpauth detection here too
     if not TOTP_ADD_ENABLED and vault and pw:
         return
@@ -6914,53 +6955,170 @@ async def adm_premium_plan_view_cb(update: Update, ctx: ContextTypes.DEFAULT_TYP
     group = q.data.split(":", 1)[1]   # basic / plus / pro
 
     if group == "basic":
+        from pricing import is_global_detect_enabled
+        gd_on = is_global_detect_enabled("basic")
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("Set Basic Message",         callback_data="adm_set_basic_msg")],
             [InlineKeyboardButton("Basic Full User Export",    callback_data="adm_noop")],
             [InlineKeyboardButton("Basic TOTP Control",        callback_data="adm_basic_totp_control")],
-            [InlineKeyboardButton("Basic TOTP Sharing Limit",  callback_data="adm_noop")],
+            [InlineKeyboardButton("Basic TOTP Sharing Limit",  callback_data="adm_basic_share_limit")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
-            [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
+            [InlineKeyboardButton(f"Global Detect {'✅' if gd_on else '❌'}", callback_data="adm_global_detect_toggle:basic")],
             [InlineKeyboardButton("⬅️ Back",                   callback_data="adm_premium_plan")],
         ])
         await q.edit_message_text("Basic Plan", reply_markup=kb)
 
     elif group == "plus":
+        from pricing import is_global_detect_enabled
+        gd_on = is_global_detect_enabled("plus")
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Plus Plan",                 callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus Plan",                 callback_data="adm_plus_plan_toggle")],
             [InlineKeyboardButton("Add Plus User",             callback_data="adm_add_plus_user")],
             [InlineKeyboardButton("Set Plus Message",          callback_data="adm_set_plus_msg")],
             [InlineKeyboardButton("Plus Plan Price",           callback_data="adm_plus_price")],
             [InlineKeyboardButton("Plus Stablecoin",           callback_data="adm_plus_stablecoin")],
             [InlineKeyboardButton("Plus Network",              callback_data="adm_plus_network")],
             [InlineKeyboardButton("Plus TOTP Control",         callback_data="adm_plus_totp_control")],
-            [InlineKeyboardButton("Plus TOTP Sharing Limit",   callback_data="adm_noop")],
+            [InlineKeyboardButton("Plus TOTP Sharing Limit",   callback_data="adm_plus_share_limit")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
             [InlineKeyboardButton("Plus Full User Export",     callback_data="adm_noop")],
-            [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
+            [InlineKeyboardButton(f"Global Detect {'✅' if gd_on else '❌'}", callback_data="adm_global_detect_toggle:plus")],
             [InlineKeyboardButton("⬅️ Back",                   callback_data="adm_premium_plan")],
         ])
         await q.edit_message_text("Plus Plan", reply_markup=kb)
 
     elif group == "pro":
+        from pricing import is_global_detect_enabled
+        gd_on = is_global_detect_enabled("pro")
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Pro Plan",                  callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro Plan",                  callback_data="adm_pro_plan_toggle")],
             [InlineKeyboardButton("Add Pro User",              callback_data="adm_add_pro_user")],
             [InlineKeyboardButton("Set Pro Message",           callback_data="adm_set_pro_msg")],
             [InlineKeyboardButton("Pro Plan Price",            callback_data="adm_pro_price")],
             [InlineKeyboardButton("Pro Stablecoin",            callback_data="adm_pro_stablecoin")],
             [InlineKeyboardButton("Pro Network",               callback_data="adm_pro_network")],
             [InlineKeyboardButton("Pro TOTP Control",          callback_data="adm_pro_totp_control")],
-            [InlineKeyboardButton("Pro TOTP Sharing Limit",    callback_data="adm_noop")],
+            [InlineKeyboardButton("Pro TOTP Sharing Limit",    callback_data="adm_pro_share_limit")],
             [InlineKeyboardButton("Offline Auto Backup",       callback_data="adm_noop")],
             [InlineKeyboardButton("Pro Full User Export",      callback_data="adm_noop")],
-            [InlineKeyboardButton("Global Detect",             callback_data="adm_noop")],
+            [InlineKeyboardButton(f"Global Detect {'✅' if gd_on else '❌'}", callback_data="adm_global_detect_toggle:pro")],
             [InlineKeyboardButton("⬅️ Back",                   callback_data="adm_premium_plan")],
         ])
         await q.edit_message_text("Pro Plan", reply_markup=kb)
 
     else:
         await q.answer("Plan not found.", show_alert=True)
+
+
+# ── Plan pack visibility toggle ───────────────────────────────────────────────
+
+async def adm_plus_plan_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    from pricing import get_plan_price
+    p30_on   = _load_setting("plus_30_visible",   "1") != "0"
+    year_on  = _load_setting("plus_year_visible",  "1") != "0"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"30 Day {'✅' if p30_on else '❌'}",  callback_data="adm_plus_pack_toggle:plus_30")],
+        [InlineKeyboardButton(f"1 Year {'✅' if year_on else '❌'}", callback_data="adm_plus_pack_toggle:plus_year")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Plan\n\nClick to show/hide pack from users:", reply_markup=kb)
+
+async def adm_plus_pack_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q       = update.callback_query; await q.answer()
+    plan_id = q.data.split(":", 1)[1]
+    key     = f"{plan_id}_visible"
+    current = _load_setting(key, "1") != "0"
+    _save_setting(key, "0" if current else "1")
+    p30_on  = _load_setting("plus_30_visible",   "1") != "0"
+    year_on = _load_setting("plus_year_visible",  "1") != "0"
+    if plan_id == "plus_30":   p30_on  = not current
+    if plan_id == "plus_year": year_on = not current
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"30 Day {'✅' if p30_on else '❌'}",  callback_data="adm_plus_pack_toggle:plus_30")],
+        [InlineKeyboardButton(f"1 Year {'✅' if year_on else '❌'}", callback_data="adm_plus_pack_toggle:plus_year")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Plan\n\nClick to show/hide pack from users:", reply_markup=kb)
+
+async def adm_pro_plan_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    p30_on  = _load_setting("pro_30_visible",   "1") != "0"
+    year_on = _load_setting("pro_year_visible",  "1") != "0"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"30 Day {'✅' if p30_on else '❌'}",  callback_data="adm_pro_pack_toggle:pro_30")],
+        [InlineKeyboardButton(f"1 Year {'✅' if year_on else '❌'}", callback_data="adm_pro_pack_toggle:pro_year")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro Plan\n\nClick to show/hide pack from users:", reply_markup=kb)
+
+async def adm_pro_pack_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q       = update.callback_query; await q.answer()
+    plan_id = q.data.split(":", 1)[1]
+    key     = f"{plan_id}_visible"
+    current = _load_setting(key, "1") != "0"
+    _save_setting(key, "0" if current else "1")
+    p30_on  = _load_setting("pro_30_visible",   "1") != "0"
+    year_on = _load_setting("pro_year_visible",  "1") != "0"
+    if plan_id == "pro_30":   p30_on  = not current
+    if plan_id == "pro_year": year_on = not current
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"30 Day {'✅' if p30_on else '❌'}",  callback_data="adm_pro_pack_toggle:pro_30")],
+        [InlineKeyboardButton(f"1 Year {'✅' if year_on else '❌'}", callback_data="adm_pro_pack_toggle:pro_year")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:pro")],
+    ])
+    await q.edit_message_text("Pro Plan\n\nClick to show/hide pack from users:", reply_markup=kb)
+
+
+# ── Share limit handlers ───────────────────────────────────────────────────────
+
+def _share_limit_menu(group: str) -> tuple[str, InlineKeyboardMarkup]:
+    from pricing import get_share_limit
+    cur = get_share_limit(group)
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Back", callback_data=f"adm_premium_plan_view:{group}"),
+    ]])
+    text = (f"{group.capitalize()} TOTP Sharing Limit\n\n"
+            f"Current: {cur} share(s) per day\n\n"
+            f"Send a number in the group to update the limit.")
+    return text, kb
+
+async def adm_basic_share_limit_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_share_limit_wait", "group": "basic"}
+    text, kb = _share_limit_menu("basic")
+    await q.edit_message_text(text, reply_markup=kb)
+
+async def adm_plus_share_limit_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_share_limit_wait", "group": "plus"}
+    text, kb = _share_limit_menu("plus")
+    await q.edit_message_text(text, reply_markup=kb)
+
+async def adm_pro_share_limit_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    _admin_import_pending[update.effective_chat.id] = {"step": "adm_share_limit_wait", "group": "pro"}
+    text, kb = _share_limit_menu("pro")
+    await q.edit_message_text(text, reply_markup=kb)
+
+
+# ── Global Detect toggle ───────────────────────────────────────────────────────
+
+async def adm_global_detect_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q     = update.callback_query; await q.answer()
+    group = q.data.split(":", 1)[1]
+    from pricing import is_global_detect_enabled
+    current = is_global_detect_enabled(group)
+    _save_setting(f"{group}_global_detect", "0" if current else "1")
+    new_state = not current
+    await q.answer(
+        f"Global Detect for {group.capitalize()} is now {'ON' if new_state else 'OFF'}.",
+        show_alert=True,
+    )
+    # Refresh the plan menu
+    ctx.args = None
+    q.data = f"adm_premium_plan_view:{group}"
+    await adm_premium_plan_view_cb(update, ctx)
 
 
 # ── Plus sub-menus ─────────────────────────────────────────────────────────────
@@ -8590,6 +8748,22 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             lines.append("")
         msg = await update.message.reply_text("\n".join(lines))
         asyncio.create_task(auto_delete_msg(msg, delay=300))
+        return
+
+    if step == "adm_share_limit_wait":
+        group = state.get("group", "basic")
+        _admin_import_pending.pop(chat_id, None)
+        asyncio.create_task(auto_delete_msg(update.message, delay=5))
+        if not raw.strip().isdigit() or int(raw.strip()) < 1:
+            msg = await update.message.reply_text("Invalid. Send a positive integer (e.g. 3).")
+            asyncio.create_task(auto_delete_msg(msg, delay=60))
+            return
+        _save_setting(f"{group}_share_limit", raw.strip())
+        success_msg = await ctx.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ {group.capitalize()} TOTP sharing limit set to {raw.strip()} per day.",
+        )
+        asyncio.create_task(auto_delete_msg(success_msg, delay=10))
         return
 
     if step == "adm_plan_price_wait":
@@ -10256,6 +10430,14 @@ def main():
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_cb),                    pattern="^adm_premium$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_cb),               pattern="^adm_premium_plan$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_plan_view_cb),          pattern="^adm_premium_plan_view:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_plan_toggle_cb),           pattern="^adm_plus_plan_toggle$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_pack_toggle_cb),           pattern="^adm_plus_pack_toggle:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_plan_toggle_cb),            pattern="^adm_pro_plan_toggle$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_pack_toggle_cb),            pattern="^adm_pro_pack_toggle:"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_basic_share_limit_cb),          pattern="^adm_basic_share_limit$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_plus_share_limit_cb),           pattern="^adm_plus_share_limit$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_pro_share_limit_cb),            pattern="^adm_pro_share_limit$"))
+        app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_global_detect_toggle_cb),       pattern="^adm_global_detect_toggle:"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_cb),                pattern="^adm_premium_api$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_premium_api_txcheck_cb),        pattern="^adm_premium_api_txcheck$"))
         app.add_handler(CallbackQueryHandler(_admin_cbq_guard(adm_set_alchemy_api_cb),            pattern="^adm_set_alchemy_api$"))
