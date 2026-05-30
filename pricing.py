@@ -1046,33 +1046,39 @@ async def cb_sub_chain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_tz = _get_user_tz(vault)
     exp_str = _fmt_expiry(invoice["expires_at"], user_tz)
     # Split expiry into date and time parts
-    exp_parts  = exp_str.split(" ")
+    exp_parts   = exp_str.split(" ")
     expiry_date = " ".join(exp_parts[:3]) if len(exp_parts) >= 3 else exp_str
     expiry_time = exp_parts[3] if len(exp_parts) >= 4 else ""
     duration_label = "30 Days" if invoice["plan_id"].endswith("_30") else "1 Year"
     explorer_url   = chain.get("explorer_url", "")
-    qr_buf  = await asyncio.to_thread(
+
+    # MarkdownV2 escape helper for dynamic values
+    import re as _re
+    def _esc(s: str) -> str:
+        return _re.sub(r'([_*\[\]()~`>#+\-=|{}.!\\])', r'\\\1', str(s))
+
+    qr_buf = await asyncio.to_thread(
         generate_payment_qr,
         invoice["address"], invoice["amount_usd"], token, chain,
     )
     caption = (
         f"💎 *Order Summary*\n"
         f"━━━━━━━━━━━━━━\n"
-        f"📦 *Plan:* {plan['name']}\n\n"
-        f"⏱️ *Duration:* {duration_label}\n\n"
-        f"💵 *Amount:* {plan['price_usd']:.2f} {token}\n\n"
-        f"🌐 *Network:* {chain['name']}\n\n"
+        f"📦 *Plan:* {_esc(plan['name'])}\n\n"
+        f"⏱️ *Duration:* {_esc(duration_label)}\n\n"
+        f"💵 *Amount:* {_esc(str(plan['price_usd']))} {_esc(token)}\n\n"
+        f"🌐 *Network:* {_esc(chain['name'])}\n\n"
         f"📬 *Send To:*\n`{invoice['address']}`\n\n"
-        f"⏳ *Expires:* {expiry_date}, {expiry_time} UTC\n\n"
+        f"⏳ *Expires:* {_esc(expiry_date)}, {_esc(expiry_time)} UTC\n\n"
         f"🆔 *Invoice ID:*\n`{invoice['invoice_id']}`\n\n"
         f"📝 *Instructions:*\n"
-        f"1\\. Send EXACTLY {plan['price_usd']:.2f} {token} only\\.\n"
-        f"2\\. Use {chain['name']} network only\\. Sending on any other network will result in lost funds\\.\n"
+        f"1\\. Send EXACTLY {_esc(str(plan['price_usd']))} {_esc(token)} only\\.\n"
+        f"2\\. Use {_esc(chain['name'])} network only\\. Sending on any other network will result in lost funds\\.\n"
         f"3\\. Double\\-check the address and QR code before confirming payment\\.\n\n"
-        f"⚠️ *Important :*\n"
-        f"\\- Pay first, then verify the transaction on {explorer_url}\\.\n"
+        f"⚠️ *Important:*\n"
+        f"\\- Pay first, then verify the transaction on {_esc(explorer_url)}\\.\n"
         f"\\- Once confirmed, click \"Check Payment Status\" in the bot and your plan will activate automatically\\.\n\n"
-        f"🔒 *Safety Tip :* Save a screenshot of this invoice, address, and transaction\\. "
+        f"🔒 *Safety Tip:* Save a screenshot of this invoice, address, and transaction\\. "
         f"If anything goes wrong, contact support with your Invoice ID, address, and screenshot for a fast resolution\\."
     )
     try:
