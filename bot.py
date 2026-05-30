@@ -8851,15 +8851,15 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
             return
         # Derive private key
         try:
-            from pricing import get_chain, _import_wallet_libs, _get_seed, Bip44Changes
+            from pricing import get_chain, _import_wallet_libs, _get_seed
+            from bip_utils import Bip44Changes as Bip44Changes_cls, Bip44Coins as _Coins
             chain    = get_chain(inv_row["chain_id"])
             addr_idx = inv_row["address_index"]
-            (Bip39SeedGenerator, Bip44, Bip44Coins,
-             Bip44Changes_cls, EthAccount, base58) = _import_wallet_libs()
+            (_, Bip44, __,
+             ___, EthAccount, base58) = _import_wallet_libs()
             seed   = _get_seed()
             family = chain["family"] if chain else "evm"
             if family == "evm":
-                from bip_utils import Bip44Coins as _Coins
                 account = (Bip44.FromSeed(seed, _Coins.ETHEREUM)
                            .Purpose().Coin().Account(0)
                            .Change(Bip44Changes_cls.CHAIN_EXT)
@@ -8867,7 +8867,6 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
                 priv_hex = account.PrivateKey().Raw().ToHex()
                 key_display = f"0x{priv_hex}"
             elif family == "solana":
-                from bip_utils import Bip44Coins as _Coins
                 account = (Bip44.FromSeed(seed, _Coins.SOLANA)
                            .Purpose().Coin().Account(0)
                            .Change(Bip44Changes_cls.CHAIN_EXT)
@@ -8877,7 +8876,6 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
                 import base64 as _b64
                 key_display = _b64.b64encode(priv_bytes + pub_bytes).decode()
             elif family == "tron":
-                from bip_utils import Bip44Coins as _Coins
                 account = (Bip44.FromSeed(seed, _Coins.TRON)
                            .Purpose().Coin().Account(0)
                            .Change(Bip44Changes_cls.CHAIN_EXT)
