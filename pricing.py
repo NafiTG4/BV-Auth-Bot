@@ -292,15 +292,6 @@ SUPPORTED_CHAINS: list[dict] = [
         },
         "explorer_url": "https://solscan.io",
     },
-    {
-        "id": "sui", "name": "Sui", "logo": "💧",
-        "family": "sui", "coin_type": 784, "bip44_index": 9,
-        "token_contracts": {
-            "USDC": "0x5d4b302506645c37ff133b98c4b50a4ae4614bb56fc4f8f7cf4a98e0b4783ade::coin::COIN",
-            "USDT": "0xc060006111016b8a020ad5b33834984a437aaa7d3c74c18e09a95d48aceab08c::coin::COIN",
-        },
-        "explorer_url": "https://suiscan.xyz",
-    },
 ]
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -472,15 +463,6 @@ def _derive_tron_address(address_index: int) -> str:
                .AddressIndex(address_index))
     return account.PublicKey().ToAddress()
 
-def _derive_sui_address(address_index: int) -> str:
-    Bip39SeedGenerator, Bip44, Bip44Coins, Bip44Changes, _, __ = _import_wallet_libs()
-    seed    = _get_seed()
-    account = (Bip44.FromSeed(seed, Bip44Coins.SUI)
-               .Purpose().Coin().Account(0)
-               .Change(Bip44Changes.CHAIN_EXT)
-               .AddressIndex(address_index))
-    return account.PublicKey().ToAddress()
-
 def generate_deposit_address(db_conn, chain: dict, vault_id: str) -> tuple[str, int]:
     """Return (address, address_index) — fresh and never reused."""
     family   = chain["family"]
@@ -493,8 +475,6 @@ def generate_deposit_address(db_conn, chain: dict, vault_id: str) -> tuple[str, 
             addr = _derive_solana_address(idx)
         elif family == "tron":
             addr = _derive_tron_address(idx)
-        elif family == "sui":
-            addr = _derive_sui_address(idx)
         else:
             addr = _derive_evm_address(idx)
         if not db_conn.execute("SELECT 1 FROM used_addresses WHERE address=?", (addr,)).fetchone():
@@ -665,8 +645,19 @@ async def _verify_solana(token: str, address: str, amount_usd: float) -> tuple[b
     if not mint:
         return False, ""
     amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
-    rpc        = "https://api.mainnet-beta.solana.com"
-    aiohttp    = _import_aiohttp()
+    # Use Helius RPC if API key is set, else public mainnet
+    helius_key = None
+    try:
+        from bot import get_db
+        with get_db() as db:
+            row = db.execute("SELECT value FROM bot_settings WHERE key='helius_api_key'").fetchone()
+        if row and row["value"]:
+            helius_key = row["value"]
+    except Exception:
+        pass
+    rpc = (f"https://mainnet.helius-rpc.com/?api-key={helius_key}"
+           if helius_key else "https://api.mainnet-beta.solana.com")
+    aiohttp = _import_aiohttp()
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(rpc, json={
@@ -716,29 +707,6 @@ async def _verify_tron(token: str, address: str,
             logger.error(f"Tron verify error: {e}")
     return False, ""
 
-async def _verify_sui(token: str, address: str, amount_usd: float) -> tuple[bool, str]:
-    coin_type  = get_chain("sui")["token_contracts"].get(token, "")
-    amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
-    rpc        = "https://fullnode.mainnet.sui.io:443"
-    aiohttp    = _import_aiohttp()
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(rpc, json={
-                "jsonrpc": "2.0", "id": 1,
-                "method": "suix_getCoins",
-                "params": [address, coin_type, None, 10],
-            }) as r:
-                data = await r.json()
-            total = sum(
-                int(c.get("balance", 0))
-                for c in data.get("result", {}).get("data", [])
-            )
-            if total >= amount_min:
-                return True, "sui-balance-confirmed"
-        except Exception as e:
-            logger.error(f"Sui verify error: {e}")
-    return False, ""
-
 async def verify_payment(invoice: dict) -> tuple[bool, str]:
     chain = get_chain(invoice["chain_id"])
     if not chain:
@@ -754,8 +722,6 @@ async def verify_payment(invoice: dict) -> tuple[bool, str]:
         return await _verify_solana(token, address, amount)
     elif family == "tron":
         return await _verify_tron(token, address, amount, since)
-    elif family == "sui":
-        return await _verify_sui(token, address, amount)
     return False, ""
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1079,18 +1045,35 @@ async def cb_sub_chain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     import datetime
     user_tz = _get_user_tz(vault)
     exp_str = _fmt_expiry(invoice["expires_at"], user_tz)
+    # Split expiry into date and time parts
+    exp_parts  = exp_str.split(" ")
+    expiry_date = " ".join(exp_parts[:3]) if len(exp_parts) >= 3 else exp_str
+    expiry_time = exp_parts[3] if len(exp_parts) >= 4 else ""
+    duration_label = "30 Days" if invoice["plan_id"].endswith("_30") else "1 Year"
+    explorer_url   = chain.get("explorer_url", "")
     qr_buf  = await asyncio.to_thread(
         generate_payment_qr,
         invoice["address"], invoice["amount_usd"], token, chain,
     )
     caption = (
-        f"📦 *{plan['name']}* — ${plan['price_usd']:.2f} {token}\n"
-        f"🌐 Network: *{chain['logo']} {chain['name']}*\n\n"
-        f"📬 *Send exactly:* `{plan['price_usd']:.2f}` {token}\n"
-        f"📮 *To address:*\n`{invoice['address']}`\n\n"
-        f"⏳ Invoice expires: {exp_str}\n"
-        f"🆔 Invoice ID: `{invoice['invoice_id'][:12]}…`\n\n"
-        "Scan the QR with any wallet. After sending, tap *Check Payment Status*."
+        f"💎 Order Summary\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"📦 Plan: {plan['name']}\n\n"
+        f"⏱️ Duration: {duration_label}\n\n"
+        f"💵 Amount: {plan['price_usd']:.2f} {token}\n\n"
+        f"🌐 Network: {chain['name']}\n\n"
+        f"📬 Send To: `{invoice['address']}`\n\n"
+        f"⏳ Expires: {expiry_date}, {expiry_time} UTC\n\n"
+        f"🆔 Invoice ID: `{invoice['invoice_id']}`\n\n"
+        f"📝 Instructions:\n"
+        f"1. Send EXACTLY {plan['price_usd']:.2f} {token} only.\n"
+        f"2. Use {chain['name']} network only. Sending on any other network will result in lost funds.\n"
+        f"3. Double-check the address and QR code before confirming payment.\n\n"
+        f"⚠️ Important :\n"
+        f"- Pay first, then verify the transaction on {explorer_url}.\n"
+        f"- Once confirmed, click \"Check Payment Status\" in the bot and your plan will activate automatically.\n\n"
+        f"🔒 Safety Tip : Save a screenshot of this invoice, address, and transaction. "
+        f"If anything goes wrong, contact support with your Invoice ID, address, and screenshot for a fast resolution."
     )
     try:
         await q.message.delete()
@@ -1099,7 +1082,6 @@ async def cb_sub_chain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_chat.send_photo(
         photo=InputFile(qr_buf, filename="payment_qr.png"),
         caption=caption,
-        parse_mode="Markdown",
         reply_markup=_kb_invoice(invoice["invoice_id"]),
     )
 
