@@ -115,6 +115,36 @@ def is_network_enabled(plan_group: str, chain_id: str) -> bool:
         pass
     return True  # default: enabled
 
+def is_global_detect_enabled(plan_group: str) -> bool:
+    """Returns True if global QR/secret detection is enabled for this plan group."""
+    try:
+        from bot import get_db
+        with get_db() as db:
+            row = db.execute(
+                "SELECT value FROM bot_settings WHERE key=?",
+                (f"{plan_group}_global_detect",)
+            ).fetchone()
+        if row and row["value"] is not None:
+            return row["value"] not in ("0", "false", "False", False, 0)
+    except Exception:
+        pass
+    return True  # default: enabled
+
+def get_share_limit(plan_group: str) -> int:
+    """Returns daily share limit for a plan group. Default: 1."""
+    try:
+        from bot import get_db
+        with get_db() as db:
+            row = db.execute(
+                "SELECT value FROM bot_settings WHERE key=?",
+                (f"{plan_group}_share_limit",)
+            ).fetchone()
+        if row and row["value"]:
+            return int(row["value"])
+    except Exception:
+        pass
+    return 1  # default: 1 share per day
+
 # Alchemy base URLs per chain (update if you use a different network)
 ALCHEMY_URLS: dict = {
     "ethereum": f"https://eth-mainnet.g.alchemy.com/v2/{{key}}",
@@ -848,12 +878,15 @@ def _kb_plans() -> InlineKeyboardMarkup:
     ])
 
 def _kb_plan_group(group: str) -> InlineKeyboardMarkup:
-    """Keyboard shown after clicking Plus or Pro — shows 30-day and yearly buy buttons."""
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Buy {group.capitalize()} 30 Day Pack",  callback_data=f"sub_buy:{group}_30")],
-        [InlineKeyboardButton(f"Buy {group.capitalize()} 1 Year Pack",  callback_data=f"sub_buy:{group}_year")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="sub_plans")],
-    ])
+    """Keyboard shown after clicking Plus or Pro — shows only visible 30-day and yearly buy buttons."""
+    from bot import _load_setting
+    buttons = []
+    if _load_setting(f"{group}_30_visible", "1") != "0":
+        buttons.append([InlineKeyboardButton(f"Buy {group.capitalize()} 30 Day Pack", callback_data=f"sub_buy:{group}_30")])
+    if _load_setting(f"{group}_year_visible", "1") != "0":
+        buttons.append([InlineKeyboardButton(f"Buy {group.capitalize()} 1 Year Pack", callback_data=f"sub_buy:{group}_year")])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="sub_plans")])
+    return InlineKeyboardMarkup(buttons)
 
 def _kb_tokens(plan_id: str) -> InlineKeyboardMarkup:
     group   = PLANS.get(plan_id, {}).get("plan_group", "plus")
@@ -1028,7 +1061,7 @@ async def cb_sub_chain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with get_db() as db:
         if get_pending_invoice(db, vault):
             await q.answer(
-                "You already have a pending invoice. Cancel it first.",
+                "You already have a pending invoice. Please cancel it or complete it, or try again after 2 hours when it expires automatically.",
                 show_alert=True,
             ); return
     await q.edit_message_text("⏳ Generating your deposit address...")
