@@ -8983,17 +8983,6 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
                            .AddressIndex(addr_idx))
                 priv_hex = account.PrivateKey().Raw().ToHex()
                 key_display = f"0x{priv_hex}"
-            elif family == "solana":
-                # Solana uses Ed25519 BIP44 with hardened path m/44'/501'/0'/0'
-                from bip_utils import Bip44Coins as _SolCoins, Bip44Changes as _SolChg
-                sol_acct = (Bip44.FromSeed(seed, _SolCoins.SOLANA)
-                            .Purpose().Coin().Account(0)
-                            .Change(_SolChg.CHAIN_EXT)
-                            .AddressIndex(addr_idx))
-                priv_bytes = sol_acct.PrivateKey().Raw().ToBytes()  # 32 bytes
-                pub_bytes  = sol_acct.PublicKey().RawCompressed().ToBytes()[-32:]  # 32 bytes (strip compression prefix)
-                keypair_bytes = priv_bytes + pub_bytes  # 64 bytes total (Phantom format)
-                key_display = base58.b58encode(keypair_bytes).decode()  # base58 encoded
             elif family == "tron":
                 account = (Bip44.FromSeed(seed, _Coins.TRON)
                            .Purpose().Coin().Account(0)
