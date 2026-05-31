@@ -7108,6 +7108,18 @@ async def adm_pro_premium_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TY
     ])
     await q.edit_message_text("Plus Plan\n\nClick to show/hide pack from users:", reply_markup=kb)
 
+async def adm_plus_plan_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    from pricing import get_plan_price
+    p30_on   = _load_setting("plus_30_visible",   "1") != "0"
+    year_on  = _load_setting("plus_year_visible",  "1") != "0"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"30 Day {'✅' if p30_on else '❌'}",  callback_data="adm_plus_pack_toggle:plus_30")],
+        [InlineKeyboardButton(f"1 Year {'✅' if year_on else '❌'}", callback_data="adm_plus_pack_toggle:plus_year")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_plan_view:plus")],
+    ])
+    await q.edit_message_text("Plus Plan\n\nClick to show/hide pack from users:", reply_markup=kb)
+
 async def adm_plus_pack_toggle_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q       = update.callback_query; await q.answer()
     plan_id = q.data.split(":", 1)[1]
