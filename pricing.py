@@ -836,12 +836,15 @@ async def _invoice_poller(db_getter, bot):
 # ⑭ KEYBOARD BUILDERS
 # ═════════════════════════════════════════════════════════════════════════════
 def _kb_plans() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Basic",  callback_data="sub_plan:basic")],
-        [InlineKeyboardButton("Plus",   callback_data="sub_plan:plus")],
-        [InlineKeyboardButton("Pro",    callback_data="sub_plan:pro")],
-        [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")],
-    ])
+    from bot import _load_setting
+    buttons = []
+    buttons.append([InlineKeyboardButton("Basic", callback_data="sub_plan:basic")])
+    if _load_setting("plus_premium_enabled", "1") != "0":
+        buttons.append([InlineKeyboardButton("Plus", callback_data="sub_plan:plus")])
+    if _load_setting("pro_premium_enabled", "1") != "0":
+        buttons.append([InlineKeyboardButton("Pro",  callback_data="sub_plan:pro")])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="main_menu")])
+    return InlineKeyboardMarkup(buttons)
 
 def _kb_plan_group(group: str) -> InlineKeyboardMarkup:
     """Keyboard shown after clicking Plus or Pro — shows only visible 30-day and yearly buy buttons."""
