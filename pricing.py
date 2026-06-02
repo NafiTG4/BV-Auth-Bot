@@ -263,6 +263,15 @@ SUPPORTED_CHAINS: list[dict] = [
         },
         "explorer_url": "https://optimistic.etherscan.io",
     },
+    {
+        "id": "solana", "name": "Solana", "logo": "◎",
+        "family": "solana", "coin_type": 501, "bip44_index": 7,
+        "token_contracts": {
+            "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        },
+        "explorer_url": "https://solscan.io",
+    },
 ]
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -416,10 +425,10 @@ def _derive_evm_address(address_index: int) -> str:
                .AddressIndex(address_index))
     return EthAccount.from_key(account.PrivateKey().Raw().ToHex()).address
 
-def _derive_tron_address(address_index: int) -> str:
+def _derive_solana_address(address_index: int) -> str:
     Bip39SeedGenerator, Bip44, Bip44Coins, Bip44Changes, _, __ = _import_wallet_libs()
     seed    = _get_seed()
-    account = (Bip44.FromSeed(seed, Bip44Coins.TRON)
+    account = (Bip44.FromSeed(seed, Bip44Coins.SOLANA)
                .Purpose().Coin().Account(0)
                .Change(Bip44Changes.CHAIN_EXT)
                .AddressIndex(address_index))
@@ -433,8 +442,8 @@ def generate_deposit_address(db_conn, chain: dict, vault_id: str) -> tuple[str, 
         idx = _next_address_index(db_conn, chain_id)
         if family == "evm":
             addr = _derive_evm_address(idx)
-        elif family == "tron":
-            addr = _derive_tron_address(idx)
+        elif family == "solana":
+            addr = _derive_solana_address(idx)
         else:
             addr = _derive_evm_address(idx)
         if not db_conn.execute("SELECT 1 FROM used_addresses WHERE address=?", (addr,)).fetchone():
@@ -600,27 +609,47 @@ async def _verify_evm(chain: dict, token: str, address: str,
             logger.error(f"Alchemy EVM verify error ({chain['id']}): {e}")
     return False, ""
 
-async def _verify_tron(token: str, address: str,
-                        amount_usd: float, since_ts: int) -> tuple[bool, str]:
-    chain = get_chain("tron")
-    if not chain:
+async def _verify_solana(token: str, address: str, amount_usd: float) -> tuple[bool, str]:
+    mint       = get_chain("solana")["token_contracts"].get(token)
+    if not mint:
         return False, ""
-    contract   = chain["token_contracts"].get(token)
     amount_min = int(amount_usd * 1_000_000 * PAYMENT_TOLERANCE)
-    url = (f"https://api.trongrid.io/v1/accounts/{address}/transactions/trc20"
-           f"?contract_address={contract}&limit=20&only_to=true")
+    helius_key = None
+    try:
+        from bot import get_db
+        with get_db() as db:
+            row = db.execute("SELECT value FROM bot_settings WHERE key='helius_api_key'").fetchone()
+        if row and row["value"]:
+            helius_key = row["value"]
+    except Exception:
+        pass
+    rpc = (f"https://mainnet.helius-rpc.com/?api-key={helius_key}"
+           if helius_key else "https://api.mainnet-beta.solana.com")
     aiohttp = _import_aiohttp()
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url) as r:
-                data = await r.json()
-            for tx in data.get("data", []):
-                if tx.get("block_timestamp", 0) // 1000 < since_ts:
+            async with session.post(rpc, json={
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [address, {"limit": 20}],
+            }) as r:
+                sigs = [s["signature"] for s in (await r.json()).get("result", [])]
+            for sig in sigs:
+                async with session.post(rpc, json={
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getTransaction",
+                    "params": [sig, {"encoding": "jsonParsed",
+                                     "maxSupportedTransactionVersion": 0}],
+                }) as r:
+                    tx = (await r.json()).get("result")
+                if not tx:
                     continue
-                if int(tx.get("value", "0")) >= amount_min:
-                    return True, tx.get("transaction_id", "")
+                for post in tx.get("meta", {}).get("postTokenBalances", []):
+                    if post.get("mint") == mint and post.get("owner") == address:
+                        if int(post.get("uiTokenAmount", {}).get("amount", "0")) >= amount_min:
+                            return True, sig
         except Exception as e:
-            logger.error(f"Tron verify error: {e}")
+            logger.error(f"Solana verify error: {e}")
     return False, ""
 
 async def verify_payment(invoice: dict) -> tuple[bool, str]:
@@ -634,8 +663,8 @@ async def verify_payment(invoice: dict) -> tuple[bool, str]:
     since   = invoice["created_at"]
     if family == "evm":
         return await _verify_evm(chain, token, address, amount, since)
-    elif family == "tron":
-        return await _verify_tron(token, address, amount, since)
+    elif family == "solana":
+        return await _verify_solana(token, address, amount)
     return False, ""
 
 # ═════════════════════════════════════════════════════════════════════════════
