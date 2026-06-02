@@ -6959,38 +6959,105 @@ async def adm_wallet_get_privkey_cb(update: Update, ctx: ContextTypes.DEFAULT_TY
     )
 
 async def adm_wallet_export_all_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Export all generated addresses as CSV sorted by amount desc, then by age asc."""
+    """Export all generated addresses with live USDC/USDT balances as CSV."""
     q = update.callback_query; await q.answer()
-    await q.edit_message_text("⏳ Generating address export, please wait...")
+    await q.edit_message_text("⏳ Fetching live balances, please wait...")
     with get_db() as c:
         rows = c.execute(
-            """SELECT ua.address, pi.chain_id, pi.token, pi.amount_usd, pi.created_at, pi.status
+            """SELECT ua.address, pi.chain_id, pi.token, pi.created_at
                FROM used_addresses ua
                LEFT JOIN payment_invoices pi ON pi.address = ua.address
-               ORDER BY pi.amount_usd DESC, pi.created_at ASC"""
+               ORDER BY pi.created_at ASC"""
         ).fetchall()
     if not rows:
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_wallet")]])
         await q.edit_message_text("No addresses found in database.", reply_markup=kb)
         return
-    from pricing import get_chain
-    import io as _io
+    from pricing import get_chain as _get_chain, ALCHEMY_URLS, get_alchemy_api_key, _import_aiohttp
+    import aiohttp as _aio
+    # Fetch USDC and USDT token contracts per chain
+    USDC_CONTRACTS = {c["id"]: c["token_contracts"].get("USDC") for c in __import__('pricing').SUPPORTED_CHAINS}
+    USDT_CONTRACTS = {c["id"]: c["token_contracts"].get("USDT") for c in __import__('pricing').SUPPORTED_CHAINS}
+    alchemy_key = get_alchemy_api_key()
+
+    async def _get_evm_balance(session, chain_id, address, contract):
+        url = ALCHEMY_URLS.get(chain_id, "").format(key=alchemy_key)
+        if not url or not contract:
+            return 0.0
+        payload = {
+            "jsonrpc": "2.0", "id": 1,
+            "method": "eth_call",
+            "params": [{
+                "to": contract,
+                "data": "0x70a08231000000000000000000000000" + address[2:].lower().zfill(64),
+            }, "latest"],
+        }
+        try:
+            async with session.post(url, json=payload) as r:
+                data = await r.json()
+            result = data.get("result", "0x0")
+            return int(result, 16) / 1_000_000
+        except Exception:
+            return 0.0
+
+    async def _get_solana_balance(session, address, mint):
+        if not mint:
+            return 0.0
+        rpc = "https://api.mainnet-beta.solana.com"
+        try:
+            async with session.post(rpc, json={
+                "jsonrpc": "2.0", "id": 1,
+                "method": "getTokenAccountsByOwner",
+                "params": [address, {"mint": mint}, {"encoding": "jsonParsed"}],
+            }) as r:
+                data = await r.json()
+            accounts = data.get("result", {}).get("value", [])
+            total = sum(
+                int(a["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
+                for a in accounts
+            )
+            return total / 1_000_000
+        except Exception:
+            return 0.0
+
+    results = []
+    async with _aio.ClientSession() as session:
+        for row in rows:
+            addr     = row["address"]
+            chain_id = row["chain_id"] or "unknown"
+            chain    = _get_chain(chain_id)
+            if not chain:
+                continue
+            family = chain["family"]
+            if family == "evm":
+                usdc = await _get_evm_balance(session, chain_id, addr, USDC_CONTRACTS.get(chain_id))
+                usdt = await _get_evm_balance(session, chain_id, addr, USDT_CONTRACTS.get(chain_id))
+            elif family == "solana":
+                usdc = await _get_solana_balance(session, addr, USDC_CONTRACTS.get(chain_id))
+                usdt = await _get_solana_balance(session, addr, USDT_CONTRACTS.get(chain_id))
+            else:
+                usdc = usdt = 0.0
+            total = usdc + usdt
+            results.append((addr, chain["name"], usdc, usdt, total))
+
+    # Sort by total balance desc
+    results.sort(key=lambda x: x[4], reverse=True)
     lines = []
-    for i, r in enumerate(rows, start=1):
-        chain_name = get_chain(r["chain_id"])["name"] if r["chain_id"] and get_chain(r["chain_id"]) else (r["chain_id"] or "Unknown")
-        token      = r["token"] or "N/A"
-        amount     = f"{r['amount_usd']:.2f}$" if r["amount_usd"] is not None else "0.00$"
-        lines.append(f"{i}. {r['address']} {chain_name} {token} {amount}")
+    for i, (addr, chain_name, usdc, usdt, total) in enumerate(results, start=1):
+        lines.append(f"{i}. {addr} {chain_name} USDC:{usdc:.2f} USDT:{usdt:.2f}")
     content = "\n".join(lines) + "\n"
     bio = BytesIO(content.encode("utf-8"))
     bio.name = "all_addresses.csv"
     await q.message.reply_document(
         document=bio,
         filename="all_addresses.csv",
-        caption=f"📄 All Generated Addresses — {len(rows)} total\nSorted by amount (highest first), then by age (oldest first).",
+        caption=(
+            f"📄 All Generated Addresses — {len(results)} total\n"
+            f"Live USDC/USDT balances. Sorted by total balance (highest first)."
+        ),
     )
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="adm_premium_wallet")]])
-    await q.edit_message_text(f"✅ Exported {len(rows)} addresses.", reply_markup=kb)
+    await q.edit_message_text(f"✅ Exported {len(results)} addresses with live balances.", reply_markup=kb)
 
 async def adm_wallet_check_balance_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Ask admin for an address to check balance."""
@@ -8983,13 +9050,16 @@ async def admin_group_message_handler(update: Update, ctx: ContextTypes.DEFAULT_
                            .AddressIndex(addr_idx))
                 priv_hex = account.PrivateKey().Raw().ToHex()
                 key_display = f"0x{priv_hex}"
-            elif family == "tron":
-                account = (Bip44.FromSeed(seed, _Coins.TRON)
-                           .Purpose().Coin().Account(0)
-                           .Change(Bip44Changes_cls.CHAIN_EXT)
-                           .AddressIndex(addr_idx))
-                priv_hex = account.PrivateKey().Raw().ToHex()
-                key_display = priv_hex
+            elif family == "solana":
+                from bip_utils import Bip44Coins as _SolCoins, Bip44Changes as _SolChg
+                sol_acct = (Bip44.FromSeed(seed, _SolCoins.SOLANA)
+                            .Purpose().Coin().Account(0)
+                            .Change(_SolChg.CHAIN_EXT)
+                            .AddressIndex(addr_idx))
+                priv_bytes    = sol_acct.PrivateKey().Raw().ToBytes()
+                pub_bytes     = sol_acct.PublicKey().RawCompressed().ToBytes()[-32:]
+                keypair_bytes = priv_bytes + pub_bytes
+                key_display   = base58.b58encode(keypair_bytes).decode()
             else:
                 key_display = "Unsupported chain family"
         except Exception as e:
